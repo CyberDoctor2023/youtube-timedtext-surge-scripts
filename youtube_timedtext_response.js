@@ -45,7 +45,8 @@ function byteLength(str) {
 }
 
 function makeHeaders(headers, responseBody, debug) {
-  let h = { ...headers };
+  let h = {};
+  for (let k in headers) h[k] = headers[k];
 
   delete h["Content-Length"];
   delete h["content-length"];
@@ -60,7 +61,6 @@ function makeHeaders(headers, responseBody, debug) {
   h["Pragma"] = "no-cache";
   h["Expires"] = "Fri, 01 Jan 1990 00:00:00 GMT";
   h["Content-Length"] = String(byteLength(responseBody));
-
   h["X-YT-Debug"] = debug || "NO_DEBUG";
 
   return h;
@@ -72,20 +72,18 @@ function isTimedText(xml) {
 
 function makeMessageBody(message) {
   return (
-    `<?xml version="1.0" encoding="utf-8" ?>` +
-    `<timedtext format="3">` +
-    `<body>` +
-    `<p t="0" d="6000">${encodeXml(message)}</p>` +
-    `</body>` +
-    `</timedtext>`
+    '<?xml version="1.0" encoding="utf-8" ?>' +
+    '<timedtext format="3">' +
+    '<body>' +
+    '<p t="0" d="6000">' + encodeXml(message) + '</p>' +
+    '</body>' +
+    '</timedtext>'
   );
 }
 
 function extractText(content) {
   content = String(content || "");
 
-  // 兼容 srv3 / ASR / Gemini 逐词结构：
-  // <p><s>word</s><s>word</s></p>
   if (/<s\b[^>]*>[\s\S]*?<\/s>/.test(content)) {
     let words = [];
 
@@ -97,8 +95,6 @@ function extractText(content) {
     return words.join(" ").replace(/\s+/g, " ").trim();
   }
 
-  // 普通结构：
-  // <p t="..." d="...">text</p>
   return decodeXml(content)
     .replace(/<[^>]+>/g, "")
     .replace(/\s+/g, " ")
@@ -115,7 +111,8 @@ function readActiveState(videoId) {
 
   candidates.push($persistentStore.read("yt_translate_last_state"));
 
-  for (let raw of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const raw = candidates[i];
     if (!raw) continue;
 
     try {
@@ -125,7 +122,6 @@ function readActiveState(videoId) {
       if (!state.target) continue;
       if (now - state.time >= ttl) continue;
 
-      // 有 videoId 时，避免串到别的视频。
       if (videoId && state.videoId && state.videoId !== videoId) continue;
 
       return state;
@@ -163,7 +159,7 @@ function googleTranslateOne(text, targetLang, callback) {
         return;
       }
 
-      const translated = json[0].map(x => x[0]).join("").trim();
+      const translated = json[0].map(function (x) { return x[0]; }).join("").trim();
       callback(translated || "【翻译失败：单条空结果】");
     } catch (e) {
       callback("【翻译失败：Google 单条解析失败】");
@@ -196,7 +192,7 @@ function googleTranslateBatch(texts, targetLang, callback) {
         return;
       }
 
-      const translatedAll = json[0].map(x => x[0]).join("");
+      const translatedAll = json[0].map(function (x) { return x[0]; }).join("");
       const parts = translatedAll.split(SPLIT_MARK);
 
       if (parts.length !== texts.length) {
@@ -204,7 +200,9 @@ function googleTranslateBatch(texts, targetLang, callback) {
         return;
       }
 
-      callback(parts.map(x => x.trim() || "【翻译失败：空结果】"));
+      callback(parts.map(function (x) {
+        return x.trim() || "【翻译失败：空结果】";
+      }));
     } catch (e) {
       callback(null);
     }
@@ -225,7 +223,6 @@ function translateAll(texts, targetLang, callback) {
     const batch = texts.slice(start, start + BATCH_SIZE);
 
     googleTranslateBatch(batch, targetLang, function (batchResult) {
-      // 批量失败时，改为逐条翻译，不静默回英文。
       if (!batchResult) {
         let local = new Array(batch.length);
         let j = 0;
@@ -264,14 +261,18 @@ function translateAll(texts, targetLang, callback) {
   nextBatch();
 }
 
-// ================= 主流程 =================
+// ================= Main =================
 
 const videoId = getParam(url, "v");
 const state = readActiveState(videoId);
 
-// 没有翻译状态：普通字幕请求，直接放行，不干扰正常英文字幕。
 if (!state || !state.target) {
-  $done({});
+  // Keep original subtitle content, but add debug header so capture can confirm the branch.
+  $done({
+    status: 200,
+    headers: makeHeaders($response.headers, body, "NO_STATE;videoId=" + (videoId || "none")),
+    body: body
+  });
   return;
 }
 
@@ -311,7 +312,11 @@ if (!isTimedText(body)) {
 }
 
 const pRegex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
-const matches = [...body.matchAll(pRegex)];
+const matches = [];
+let match;
+while ((match = pRegex.exec(body)) !== null) {
+  matches.push(match);
+}
 
 if (!matches.length) {
   const msgBody = makeMessageBody("【翻译失败：没有字幕节点】");
@@ -357,7 +362,7 @@ if (!items.length) {
   return;
 }
 
-const originals = items.map(x => x.text);
+const originals = items.map(function (x) { return x.text; });
 
 translateAll(originals, target, function (translatedTexts) {
   const translatedByPIndex = {};
@@ -370,19 +375,19 @@ translateAll(originals, target, function (translatedTexts) {
   let pIndex = 0;
   let replaced = 0;
 
-  const newBody = body.replace(pRegex, function (match, attrs, content) {
+  const newBody = body.replace(pRegex, function (whole, attrs, content) {
     const original = extractText(content);
 
     if (!original) {
       pIndex++;
-      return match;
+      return whole;
     }
 
     const translated = translatedByPIndex[pIndex] || "【翻译失败：未生成结果】";
     pIndex++;
     replaced++;
 
-    return `<p${attrs}>${encodeXml(translated)}</p>`;
+    return '<p' + attrs + '>' + encodeXml(translated) + '</p>';
   });
 
   const debug =

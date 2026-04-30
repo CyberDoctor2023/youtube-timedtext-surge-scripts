@@ -1,6 +1,6 @@
 let url = $request.url;
 
-const ACTIVE_TTL = 180000; // 3 分钟
+const ACTIVE_TTL = 180000; // 3 minutes
 
 function getParam(u, name) {
   const m = u.match(new RegExp("[?&]" + name + "=([^&]+)"));
@@ -16,7 +16,7 @@ function removeParam(u, name) {
 
   const kept = query
     .split("&")
-    .filter(part => {
+    .filter(function (part) {
       if (!part) return false;
       const key = part.split("=")[0];
       return key !== name;
@@ -28,8 +28,6 @@ function removeParam(u, name) {
 const videoId = getParam(url, "v");
 const target = getParam(url, "tlang");
 
-// 用户点击 YouTube 自动翻译字幕时，URL 会带 tlang。
-// 这里保存目标语言，然后删除 tlang，避免 YouTube 后端返回 429。
 if (target) {
   const state = JSON.stringify({
     videoId: videoId || "",
@@ -42,12 +40,9 @@ if (target) {
     $persistentStore.write(state, "yt_translate_state_" + videoId);
   }
 
-  // 全局兜底，response 里会校验 videoId，避免串视频。
   $persistentStore.write(state, "yt_translate_last_state");
 
   let newUrl = removeParam(url, "tlang");
-
-  // 清理历史残留，最终发给 YouTube 的 URL 不能有这些。
   newUrl = removeParam(newUrl, "_yt_x");
   newUrl = removeParam(newUrl, "_yt_trg");
 
