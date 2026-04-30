@@ -1,24 +1,9 @@
 const url = $request.url;
 let body = $response.body || "";
 
+const TARGET_LANG = "zh-CN"; // 先固定简体中文，跑通后再做繁中/其他语言
 const BATCH_SIZE = 5;
 const SPLIT_MARK = "\n<<<YT_SPLIT_SAFE_2026>>>\n";
-
-function getParam(u, name) {
-  const m = u.match(new RegExp("[?&]" + name + "=([^&]+)"));
-  return m ? decodeURIComponent(m[1]) : "";
-}
-
-function normalizeTarget(lang) {
-  if (!lang) return "";
-
-  const x = lang.toLowerCase();
-
-  if (x === "zh-hans" || x === "zh-cn" || x === "zh") return "zh-CN";
-  if (x === "zh-hant" || x === "zh-tw" || x === "zh-hk") return "zh-TW";
-
-  return lang;
-}
 
 function decodeXml(str) {
   return String(str || "")
@@ -84,6 +69,7 @@ function makeMessageBody(message) {
 function extractText(content) {
   content = String(content || "");
 
+  // 兼容 Gemini / ASR 的逐词结构：<p><s>word</s><s>word</s></p>
   if (/<s\b[^>]*>[\s\S]*?<\/s>/.test(content)) {
     let words = [];
 
@@ -95,40 +81,11 @@ function extractText(content) {
     return words.join(" ").replace(/\s+/g, " ").trim();
   }
 
+  // 普通结构：<p t="..." d="...">text</p>
   return decodeXml(content)
     .replace(/<[^>]+>/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function readActiveState(videoId) {
-  const now = Date.now();
-  let candidates = [];
-
-  if (videoId) {
-    candidates.push($persistentStore.read("yt_translate_state_" + videoId));
-  }
-
-  candidates.push($persistentStore.read("yt_translate_last_state"));
-
-  for (let i = 0; i < candidates.length; i++) {
-    const raw = candidates[i];
-    if (!raw) continue;
-
-    try {
-      const state = JSON.parse(raw);
-      const ttl = state.ttl || 180000;
-
-      if (!state.target) continue;
-      if (now - state.time >= ttl) continue;
-
-      if (videoId && state.videoId && state.videoId !== videoId) continue;
-
-      return state;
-    } catch (e) {}
-  }
-
-  return null;
 }
 
 function googleTranslateOne(text, targetLang, callback) {
@@ -159,7 +116,10 @@ function googleTranslateOne(text, targetLang, callback) {
         return;
       }
 
-      const translated = json[0].map(function (x) { return x[0]; }).join("").trim();
+      const translated = json[0].map(function (x) {
+        return x[0];
+      }).join("").trim();
+
       callback(translated || "【翻译失败：单条空结果】");
     } catch (e) {
       callback("【翻译失败：Google 单条解析失败】");
@@ -192,7 +152,10 @@ function googleTranslateBatch(texts, targetLang, callback) {
         return;
       }
 
-      const translatedAll = json[0].map(function (x) { return x[0]; }).join("");
+      const translatedAll = json[0].map(function (x) {
+        return x[0];
+      }).join("");
+
       const parts = translatedAll.split(SPLIT_MARK);
 
       if (parts.length !== texts.length) {
@@ -223,6 +186,7 @@ function translateAll(texts, targetLang, callback) {
     const batch = texts.slice(start, start + BATCH_SIZE);
 
     googleTranslateBatch(batch, targetLang, function (batchResult) {
+      // 批量失败时，降级逐条翻译
       if (!batchResult) {
         let local = new Array(batch.length);
         let j = 0;
@@ -263,48 +227,12 @@ function translateAll(texts, targetLang, callback) {
 
 // ================= Main =================
 
-const videoId = getParam(url, "v");
-const state = readActiveState(videoId);
-
-if (!state || !state.target) {
-  // Keep original subtitle content, but add debug header so capture can confirm the branch.
-  $done({
-    status: 200,
-    headers: makeHeaders($response.headers, body, "NO_STATE;videoId=" + (videoId || "none")),
-    body: body
-  });
-  return;
-}
-
-const rawTarget = state.target;
-const target = normalizeTarget(rawTarget);
-
-if (!target) {
-  const msgBody = makeMessageBody("【翻译失败：目标语言为空】");
-
-  $done({
-    status: 200,
-    headers: makeHeaders(
-      $response.headers,
-      msgBody,
-      "EMPTY_TARGET;videoId=" + (videoId || "none") + ";rawTarget=" + rawTarget
-    ),
-    body: msgBody
-  });
-
-  return;
-}
-
 if (!isTimedText(body)) {
   const msgBody = makeMessageBody("【翻译失败：当前响应不是 timedtext】");
 
   $done({
     status: 200,
-    headers: makeHeaders(
-      $response.headers,
-      msgBody,
-      "NOT_TIMEDTEXT;videoId=" + (videoId || "none") + ";rawTarget=" + rawTarget + ";target=" + target
-    ),
+    headers: makeHeaders($response.headers, msgBody, "STATELESS_NOT_TIMEDTEXT"),
     body: msgBody
   });
 
@@ -314,6 +242,7 @@ if (!isTimedText(body)) {
 const pRegex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
 const matches = [];
 let match;
+
 while ((match = pRegex.exec(body)) !== null) {
   matches.push(match);
 }
@@ -323,11 +252,7 @@ if (!matches.length) {
 
   $done({
     status: 200,
-    headers: makeHeaders(
-      $response.headers,
-      msgBody,
-      "NO_P_NODES;videoId=" + (videoId || "none") + ";rawTarget=" + rawTarget + ";target=" + target
-    ),
+    headers: makeHeaders($response.headers, msgBody, "STATELESS_NO_P_NODES"),
     body: msgBody
   });
 
@@ -338,6 +263,7 @@ const items = [];
 
 matches.forEach(function (m, idx) {
   const text = extractText(m[2]);
+
   if (text) {
     items.push({
       index: idx,
@@ -351,20 +277,18 @@ if (!items.length) {
 
   $done({
     status: 200,
-    headers: makeHeaders(
-      $response.headers,
-      msgBody,
-      "EMPTY_TEXT;videoId=" + (videoId || "none") + ";rawTarget=" + rawTarget + ";target=" + target
-    ),
+    headers: makeHeaders($response.headers, msgBody, "STATELESS_EMPTY_TEXT"),
     body: msgBody
   });
 
   return;
 }
 
-const originals = items.map(function (x) { return x.text; });
+const originals = items.map(function (x) {
+  return x.text;
+});
 
-translateAll(originals, target, function (translatedTexts) {
+translateAll(originals, TARGET_LANG, function (translatedTexts) {
   const translatedByPIndex = {};
 
   for (let i = 0; i < items.length; i++) {
@@ -391,10 +315,8 @@ translateAll(originals, target, function (translatedTexts) {
   });
 
   const debug =
-    "OK" +
-    ";videoId=" + (videoId || "none") +
-    ";rawTarget=" + rawTarget +
-    ";target=" + target +
+    "STATELESS_OK" +
+    ";target=" + TARGET_LANG +
     ";count=" + items.length +
     ";replaced=" + replaced;
 
