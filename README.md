@@ -46,7 +46,7 @@ In affected environments, the final request containing `tlang` receives:
 HTTP/1.1 429 Too Many Requests
 ```
 
-This has been especially reproducible in China-mainland-facing proxy or airport environments, where YouTube timedtext auto-translation requests routed through certain exit IPs appear to be rate-limited or rejected even when normal subtitle requests still work. The practical symptom is simple: original-language subtitles load, but auto-translated subtitles fail.
+This has been especially reproducible in China-mainland-facing proxy or airport environments, where YouTube timedtext auto-translation requests routed through certain exit IPs appear to be rate-limited or rejected even when normal subtitle requests still work. In community testing, the issue often disappeared when using a clean VPS exit, overseas SIM/mobile data, or otherwise cleaner nodes. The practical symptom is simple: original-language subtitles load, but auto-translated subtitles fail.
 
 This is not an isolated local configuration problem. Users have reported broken YouTube auto-translated subtitles across countries, devices, and apps. A ReVanced Extended issue also documents that unpatched YouTube auto-translated subtitle requests with the `tlang` query parameter can return 429, even when a normal rate limit has not actually been reached.
 
@@ -62,6 +62,7 @@ Important outside observations:
 
 - Reddit users report auto-translate failures in many regions and on iOS/desktop/browser variants.
 - ReVanced Extended issue #3147 describes `tlang` timedtext auto-translation requests returning 429 and proposes fixing Android by adding transcript cookies.
+- NodeSeek community discussion by TraderYao on YouTube "加载字幕时错误" helped confirm the China-network/dirty-exit-node angle: in that testing, clean nodes, VPS exits, or overseas SIM traffic were the reliable way to avoid the failure.
 - This repository solves the Surge/iOS proxy use case differently: it prevents YouTube from seeing `tlang` at all, while preserving `tlang` locally for response translation.
 
 ## Why URL Rewrite Alone Is Not Enough
@@ -316,6 +317,8 @@ The closest practical equivalent is progressive caching across repeated timedtex
 
 ## Relationship To DualSubs
 
+This project partially references and learns from the now-broken DualSubs approach and from NodeSeek community troubleshooting around YouTube "加载字幕时错误".
+
 DualSubs inspired parts of the investigation, especially:
 
 - caching language state;
@@ -330,6 +333,14 @@ Only /api/timedtext XML response translation for Surge/iOS.
 ```
 
 DualSubs primarily works at the captions tracklist/player-response layer. This repository works directly on the timedtext XML body after obtaining a clean upstream response.
+
+NodeSeek/TraderYao's testing helped frame the network-side diagnosis: in China-facing proxy environments, the problem is not only an XML parsing problem or a YouTube App UI problem. It is often tied to whether the final timedtext auto-translation request exits from a clean enough network path. This repository avoids sending the fragile `tlang` request upstream, so it can work even when changing to a clean node is inconvenient.
+
+## Acknowledgements
+
+- DualSubs, for its earlier exploration of YouTube captions, `tlang`, subtitle modes, and language-state caching.
+- NodeSeek community discussion by TraderYao, for documenting the YouTube "加载字幕时错误" troubleshooting path and the observation that clean VPS exits or overseas SIM traffic can avoid the China-environment 429 failure.
+- Reddit, YouTube Help Community, and ReVanced Extended reports, for showing this is a broader, long-running auto-translate subtitle reliability issue rather than a single-user misconfiguration.
 
 ## Known Limits
 
