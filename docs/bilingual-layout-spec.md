@@ -32,8 +32,7 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Short ASR cues are enriched with nearby context without deleting or merging source paragraphs.
 - ASR overlapping paragraph durations are clamped before the next caption starts.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
-- Response script uses a foreground-response deadline strategy: Google Translate requests time out quickly, beta2 limits concurrent translate requests for unstable routes, and complete Google Translate failure returns a full-track diagnostic subtitle in every cue instead of waiting until the YouTube app closes the connection.
-- Long tracks select translation chunks from both the beginning and the end of the remaining untranslated subtitles, so the tail of a video is not starved by repeated front-only chunk scheduling.
+- Response script uses a foreground-response deadline strategy: Google Translate requests time out quickly, beta5 raises chunk throughput and translates the next uncached chunks in timeline order, so repeated timedtext requests caused by seeking can progressively fill the cache instead of reshuffling gaps.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
 - The install URL points to the GitHub Release `.sgmodule` asset, and the visible module `version` argument matches the release/tag rather than a self-referential commit hash.
 - README documents current features and design tradeoffs without a long commit-by-commit history.

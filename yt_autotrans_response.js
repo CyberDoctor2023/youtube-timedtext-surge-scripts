@@ -1,8 +1,8 @@
 const REQUEST_TIMEOUT = 3;
-const RESPONSE_DEADLINE_MS = 6500;
+const RESPONSE_DEADLINE_MS = 7500;
 const MAX_URL_LENGTH = 5000;
-const MAX_CHUNKS_PER_RESPONSE = 12;
-const MAX_PARALLEL_REQUESTS = 2;
+const MAX_CHUNKS_PER_RESPONSE = 24;
+const MAX_PARALLEL_REQUESTS = 12;
 const MAX_SEGMENT_WIDTH = 92;
 const MAX_SEGMENT_WORDS = 16;
 const MIN_SENTENCE_WIDTH = 24;
@@ -11,7 +11,7 @@ const SHORT_CONTEXT_WORDS = 16;
 const SHORT_TOKEN_LIMIT = 2;
 const SHORT_DISPLAY_WIDTH = 14;
 const SHORT_DURATION_MS = 1200;
-const CACHE_VERSION = 13;
+const CACHE_VERSION = 14;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -607,7 +607,7 @@ function applyMarkedTranslations(translatedText, items, cache) {
 }
 
 function buildChunks(items) {
-  const allChunks = [];
+  const chunks = [];
   let current = [];
   let currentText = "";
 
@@ -628,53 +628,24 @@ function buildChunks(items) {
       current.length > 0 &&
       encodeURIComponent(nextText).length > MAX_URL_LENGTH
     ) {
-      allChunks.push(current);
+      chunks.push(current);
       current = [nextItem];
       currentText = makeMarkedText([nextItem]);
     } else {
       current.push(nextItem);
       currentText = nextText;
     }
-  }
 
-  if (current.length > 0) {
-    allChunks.push(current);
-  }
-
-  if (allChunks.length <= MAX_CHUNKS_PER_RESPONSE) {
-    return allChunks;
-  }
-
-  return selectEdgeCoverageChunks(allChunks);
-}
-
-function selectEdgeCoverageChunks(chunks) {
-  const selected = [];
-  const used = {};
-  const headCount = Math.ceil(MAX_CHUNKS_PER_RESPONSE / 2);
-  const tailCount = MAX_CHUNKS_PER_RESPONSE - headCount;
-  const rounds = Math.max(headCount, tailCount);
-
-  function addChunk(index) {
-    if (index < 0 || index >= chunks.length || used[index]) {
-      return;
-    }
-
-    selected.push(chunks[index]);
-    used[index] = true;
-  }
-
-  for (let index = 0; index < rounds; index += 1) {
-    if (index < headCount) {
-      addChunk(index);
-    }
-
-    if (index < tailCount) {
-      addChunk(chunks.length - 1 - index);
+    if (chunks.length >= MAX_CHUNKS_PER_RESPONSE) {
+      break;
     }
   }
 
-  return selected;
+  if (current.length > 0 && chunks.length < MAX_CHUNKS_PER_RESPONSE) {
+    chunks.push(current);
+  }
+
+  return chunks;
 }
 
 function markTranslateTimeoutTrack(items) {
