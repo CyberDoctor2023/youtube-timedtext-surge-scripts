@@ -18,7 +18,7 @@ function removeParam(u, name) {
   return kept.length ? base + "?" + kept.join("&") : base;
 }
 
-// 只负责删除 tlang，避免 YouTube 429
+// 只删除会触发 429 的参数
 let newUrl = removeParam(url, "tlang");
 newUrl = removeParam(newUrl, "_yt_x");
 newUrl = removeParam(newUrl, "_yt_trg");
