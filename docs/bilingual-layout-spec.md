@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add optional bilingual timedtext output for YT AutoTrans Error. The first implementation controls whether each existing timedtext paragraph shows source text plus translated text, and exposes that choice through Surge editable module parameters. Centering and sentence grouping are separate follow-up tasks.
+Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable by default through Surge module parameters, and make YouTube ASR timedtext closer to native centered captions.
 
 ## Non-goals
 
@@ -22,17 +22,20 @@ Add optional bilingual timedtext output for YT AutoTrans Error. The first implem
 - Older `bilingual/order` script arguments remain compatible.
 - Long ASR paragraphs are split by timed `<s>` tokens before translation.
 - Splitting considers punctuation, rough display width, and token count.
+- Splitting avoids one-word or two-word over-fragmentation for normal English ASR captions.
+- ASR timedtext head/window style is normalized toward bottom-centered captions.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
+- Remote script URLs are versioned so module updates can force a fresh external script resource URL.
 - Scripts pass `node --check`.
 
 ## Validation Plan
 
 - Review DualSubs Universal template for `#!arguments` / `#!arguments-desc` and subtitle composition ideas.
-- Verify Surge module parameter syntax against local CLI/help and official manual where possible.
+- Verify Surge module parameter syntax and external-resource commands against local CLI/help.
 - Run syntax checks for request and response scripts.
 - Search README/module for stale filenames and stale option names.
 
 ## Follow-up Todos
 
-- Todo 2: center subtitle layout.
-- Todo 3: sentence grouping for ASR captions.
+- Tune timedtext centering further if real iOS captures show a different `wp/ws` enum is needed.
+- Tune ASR grouping with more real auto-generated captions.

@@ -45,12 +45,13 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 #!desc=修复 YouTube iOS 自动翻译字幕 429 / Fix YouTube iOS auto-translated subtitle 429.
 #!system=ios
 #!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
+#!version=2026.05.01.2
 #!arguments=mode:dual
 #!arguments-desc=[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
 
 [Script]
-youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=3600,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-update-interval=3600,argument=mode={{{mode}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js
+youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=3600,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js?v=2026.05.01.2
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-update-interval=3600,argument=mode={{{mode}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js?v=2026.05.01.2
 
 [MITM]
 hostname = %APPEND% www.youtube.com
@@ -61,7 +62,7 @@ hostname = %APPEND% www.youtube.com
 - Surge 的模块/脚本列表里名称可能不够醒目，因此模块头部包含 `#!icon`。图标使用红色禁止符号和 `429`，用于直接表达“修复 YouTube 自动翻译字幕 429 错误”。
 - 模块使用 Surge 参数表。参数只有一个：`mode`，默认值是 `dual`，不手动填写也会启用双语模式。
 - `mode=dual`：双语，原文在上、译文在下，英译中时就是“英中”。`mode=reverse`：双语，译文在上、原文在下，英译中时就是“中英”。`mode=single`：单语，只显示译文。
-- 远程脚本设置了 `script-update-interval=3600`。Surge 会按脚本外部资源机制自动检查更新；刚发布新版本时仍建议手动更新一次 External Resources。
+- 远程脚本设置了 `script-update-interval=3600`，并带有版本参数 `?v=...`。Surge CLI 的 `--help` 只显示了 `external-resource update <key>` 和 `external-resource update all`，没有显示“模块更新时强制刷新全部脚本资源”的模块指令；因此本模块通过 bump `#!version` 和脚本 URL 版本号，让模块更新时脚本 URL 也变化，从而触发重新拉取。
 - 删除旧的、用于删除 `/api/timedtext` 里 `tlang` 的 URL Rewrite。
 - 保留 `www.youtube.com` 的 MITM。
 - 不要把 `translate.googleapis.com` 加进 MITM。它是脚本内部 `$httpClient` 主动请求的翻译接口，不是 YouTube App 发出的被拦截流量，不需要解密。
@@ -188,6 +189,7 @@ YouTube iOS 经常返回 srv3 XML：
 - 保留空白 spacer 段落；
 - 从嵌套 `<s>` 节点里提取字幕文本；
 - 自动字幕过长时，会按词级 `<s>` 时间戳切成更短的 `<p>` 片段。分句器会参考标点、估算显示宽度和词数，再分别翻译并写回双语文本，减少 iPhone 上原文自动折成两行导致“三行字幕”的概率。
+- 对 YouTube 自动生成字幕常见的左侧 ASR 窗口做布局归一化：把 `ws id="1"` 的对齐改为居中，并把 `wp id="1"` 调整为底部居中的字幕窗口。这样处理的是 timedtext 自身的显示窗口，而不是简单往文本前面补空格。
 - 把每个输出片段写回为单个 `<s ac="0">...</s>`。
 
 它不会强行保留原来的逐词 `<s t="...">` 分段，因为英文词级时间戳无法可靠映射到中文、日文、韩文等翻译结果。
@@ -227,6 +229,7 @@ cleanUrl + targetLang -> translated paragraph map
 dump profile [original / effective] - Show the original profile and the effective profile modified by modules
 watch request - Keep tracing the new requests
 script evaluate <script-js-path> [mock-script-type] [timeout] - Load a script from a file and evaluate
+external-resource update all - Update all external resources
 --check/-c <path> - Check whether a profile is valid.
 ```
 
@@ -236,6 +239,7 @@ script evaluate <script-js-path> [mock-script-type] [timeout] - Load a script fr
 - `surge-cli --check` 验证完整测试 profile 中的 Script + MITM 配置；
 - `surge-cli dump profile effective` 查看模块生效后的 profile；
 - `surge-cli watch request` 和实际日志验证请求链路；
+- `surge-cli external-resource update all` 确认外部资源只能由 CLI/客户端触发更新，模块侧采用版本化脚本 URL 解决发版刷新；
 - `node --check` 验证 JavaScript 语法；
 - 本地模拟 clean URL 元数据读写。
 
@@ -357,6 +361,7 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 Important:
 
 - The Surge module/script list may not show the script name prominently, so the module includes `#!icon`. The icon uses a red prohibition mark and `429` to make the purpose recognizable at a glance.
+- Remote scripts use `script-update-interval=3600` and versioned URLs such as `?v=2026.05.01.2`. The local Surge CLI help exposes `external-resource update <key>` and `external-resource update all`, but no module directive that forcibly refreshes all external scripts when a module is updated. Versioned script URLs make each release a new resource URL, so Surge fetches the current scripts after module updates.
 - Remove old `/api/timedtext` URL Rewrite rules that delete `tlang`.
 - Keep MITM enabled for `www.youtube.com`.
 - Do not add `translate.googleapis.com` to MITM. It is called by Surge's `$httpClient` inside the script; the app traffic does not need to be decrypted there.
@@ -470,6 +475,8 @@ YouTube iOS often returns srv3 XML:
 
 The response script preserves the timedtext XML shell, extracts visible text from nested `<s>` nodes, splits long ASR paragraphs into shorter timed `<p>` segments by punctuation, estimated display width, and token count, then writes each output segment back as a single `<s ac="0">...</s>` node.
 
+For YouTube auto-generated captions that arrive in a left-aligned ASR window, the script also normalizes the timedtext head/window metadata: it changes the `ws id="1"` alignment toward center and moves `wp id="1"` toward a bottom-centered caption window. This targets the timedtext layout itself rather than padding the subtitle text with spaces.
+
 The module exposes one Surge editable parameter through `#!arguments`: `mode`. Use `mode=dual` for source above translation, `mode=reverse` for translation above source, and `mode=single` for translation only.
 
 ### Cache Strategy
@@ -497,10 +504,11 @@ Relevant local CLI entries:
 dump profile [original / effective] - Show the original profile and the effective profile modified by modules
 watch request - Keep tracing the new requests
 script evaluate <script-js-path> [mock-script-type] [timeout] - Load a script from a file and evaluate
+external-resource update all - Update all external resources
 --check/-c <path> - Check whether a profile is valid.
 ```
 
-Development checks included `surge-cli --help`, `surge-cli --check` against a complete test profile, `dump profile effective`, `watch request`, `node --check`, and local simulation of clean URL metadata lookup.
+Development checks included `surge-cli --help`, `surge-cli --check` against a complete test profile, `dump profile effective`, `watch request`, `external-resource update all`, `node --check`, and local simulation of clean URL metadata lookup.
 
 ### FAQ
 

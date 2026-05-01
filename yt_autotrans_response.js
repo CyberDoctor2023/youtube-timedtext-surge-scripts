@@ -1,9 +1,9 @@
 const REQUEST_TIMEOUT = 5;
 const MAX_URL_LENGTH = 5000;
 const MAX_CHUNKS_PER_RESPONSE = 8;
-const MAX_SEGMENT_WIDTH = 42;
-const MAX_SEGMENT_WORDS = 7;
-const MIN_SENTENCE_WIDTH = 16;
+const MAX_SEGMENT_WIDTH = 60;
+const MAX_SEGMENT_WORDS = 10;
+const MIN_SENTENCE_WIDTH = 24;
 const CACHE_VERSION = 2;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
@@ -217,6 +217,39 @@ function buildAttrs(values) {
   }
 
   return attrs;
+}
+
+function mergeAttrs(attrs, values) {
+  return buildAttrs(Object.assign({}, parseAttrs(attrs), values));
+}
+
+function normalizeTimedtextLayout(input) {
+  let output = input;
+
+  output = output.replace(/<ws\b([^>]*\bid="1"[^>]*)\/>/, function (match, attrs) {
+    return "<ws" + mergeAttrs(attrs, {
+      ju: "2"
+    }) + "/>";
+  });
+
+  output = output.replace(/<wp\b([^>]*\bid="1"[^>]*)\/>/, function (match, attrs) {
+    return "<wp" + mergeAttrs(attrs, {
+      ap: "7",
+      ah: "50",
+      av: "100",
+      rc: "2",
+      cc: "40"
+    }) + "/>";
+  });
+
+  output = output.replace(/<w\b([^>]*\bid="1"[^>]*)\/>/, function (match, attrs) {
+    return "<w" + mergeAttrs(attrs, {
+      wp: "1",
+      ws: "1"
+    }) + "/>";
+  });
+
+  return output;
 }
 
 function extractSegments(content, duration) {
@@ -560,6 +593,8 @@ if (!meta) {
   const items = [];
   let match;
   let paragraphIndex = 0;
+
+  body = normalizeTimedtextLayout(body);
 
   while ((match = pRegex.exec(body)) !== null) {
     const splitItems = splitContent(match[1], match[2], paragraphIndex);
