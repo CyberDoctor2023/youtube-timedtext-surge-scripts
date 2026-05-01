@@ -1,6 +1,6 @@
 let url = $request.url;
 
-const ACTIVE_TTL = 30000; // 30秒，只用于下一次 response
+const TTL = 60000; // 60 秒
 
 function getParam(u, name) {
   const m = u.match(new RegExp("[?&]" + name + "=([^&]+)"));
@@ -18,32 +18,39 @@ function removeParam(u, name) {
     .split("&")
     .filter(function (part) {
       if (!part) return false;
-      const key = part.split("=")[0];
-      return key !== name;
+      return part.split("=")[0] !== name;
     });
 
   return kept.length ? base + "?" + kept.join("&") : base;
 }
 
-const videoId = getParam(url, "v");
+function simpleHash(str) {
+  let h = 2166136261;
+
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+  }
+
+  return (h >>> 0).toString(16);
+}
+
 const target = getParam(url, "tlang");
 
-if (target && videoId) {
-  const state = JSON.stringify({
-    videoId: videoId,
+if (target) {
+  let cleanUrl = removeParam(url, "tlang");
+  cleanUrl = removeParam(cleanUrl, "_yt_x");
+  cleanUrl = removeParam(cleanUrl, "_yt_trg");
+
+  const key = "yt_tt_" + simpleHash(cleanUrl);
+
+  $persistentStore.write(JSON.stringify({
     target: target,
     time: Date.now(),
-    ttl: ACTIVE_TTL
-  });
+    ttl: TTL
+  }), key);
 
-  // 只存当前视频的一次性 pending，不再存全局 last_state
-  $persistentStore.write(state, "yt_translate_pending_" + videoId);
-
-  let newUrl = removeParam(url, "tlang");
-  newUrl = removeParam(newUrl, "_yt_x");
-  newUrl = removeParam(newUrl, "_yt_trg");
-
-  $done({ url: newUrl });
+  $done({ url: cleanUrl });
 } else {
   $done({});
 }
