@@ -1,6 +1,7 @@
 #!name=YT AutoTrans Error
 #!desc=Fix YouTube timedtext auto-translation 429 on Surge.
 #!system=ios
+#!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
 
 [Script]
 youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/youtube_timedtext_request.js
