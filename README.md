@@ -16,7 +16,7 @@ The current solution has been verified with YouTube iOS timedtext traffic:
 Recommended module URL:
 
 ```text
-https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/youtube-timedtext-translate.sgmodule
+https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/yt-autotrans.sgmodule
 ```
 
 The module contains:

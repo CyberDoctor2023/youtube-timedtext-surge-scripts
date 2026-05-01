@@ -1,5 +1,5 @@
-#!name=YouTube TimedText Translate
-#!desc=Fix YouTube iOS timedtext auto-translation 429 by local 302 redirect, target-language metadata cache, and local timedtext XML translation.
+#!name=YT AutoTrans
+#!desc=Fix YouTube timedtext auto-translation 429 on Surge.
 #!system=ios
 
 [Script]
