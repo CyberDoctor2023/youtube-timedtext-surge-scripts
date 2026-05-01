@@ -45,13 +45,13 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 #!desc=修复 YouTube iOS 自动翻译字幕 429 / Fix YouTube iOS auto-translated subtitle 429.
 #!system=ios
 #!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
-#!version=2026.05.01.2
+#!version=2026.05.01.3
 #!arguments=mode:dual
 #!arguments-desc=[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
 
 [Script]
-youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=3600,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js?v=2026.05.01.2
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-update-interval=3600,argument=mode={{{mode}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js?v=2026.05.01.2
+youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=3600,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js?v=2026.05.01.3
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-update-interval=3600,argument=mode={{{mode}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js?v=2026.05.01.3
 
 [MITM]
 hostname = %APPEND% www.youtube.com
@@ -186,10 +186,11 @@ YouTube iOS 经常返回 srv3 XML：
 
 - 保留 timedtext XML 的外层结构；
 - 保留 `<p>` 的 `t`、`d`、`w`、`a` 等时间属性；
-- 保留空白 spacer 段落；
+- 删除自动生成字幕里的空白 roll-up spacer 段落，例如 `<p ... a="1"></p>`，避免双语字幕额外占行；
 - 从嵌套 `<s>` 节点里提取字幕文本；
 - 自动字幕过长时，会按词级 `<s>` 时间戳切成更短的 `<p>` 片段。分句器会参考标点、估算显示宽度和词数，再分别翻译并写回双语文本，减少 iPhone 上原文自动折成两行导致“三行字幕”的概率。
 - 对 YouTube 自动生成字幕常见的左侧 ASR 窗口做布局归一化：把 `ws id="1"` 的对齐改为居中，并把 `wp id="1"` 调整为底部居中的字幕窗口。这样处理的是 timedtext 自身的显示窗口，而不是简单往文本前面补空格。
+- 双语换行写成 XML 数字实体 `&#x000A;`，而不是直接写真实换行字符；这是为了让 YouTube App 把双语识别成两行字幕，而不是把换行折叠成普通空白后自动排成三行。
 - 把每个输出片段写回为单个 `<s ac="0">...</s>`。
 
 它不会强行保留原来的逐词 `<s t="...">` 分段，因为英文词级时间戳无法可靠映射到中文、日文、韩文等翻译结果。
@@ -361,7 +362,7 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 Important:
 
 - The Surge module/script list may not show the script name prominently, so the module includes `#!icon`. The icon uses a red prohibition mark and `429` to make the purpose recognizable at a glance.
-- Remote scripts use `script-update-interval=3600` and versioned URLs such as `?v=2026.05.01.2`. The local Surge CLI help exposes `external-resource update <key>` and `external-resource update all`, but no module directive that forcibly refreshes all external scripts when a module is updated. Versioned script URLs make each release a new resource URL, so Surge fetches the current scripts after module updates.
+- Remote scripts use `script-update-interval=3600` and versioned URLs such as `?v=2026.05.01.3`. The local Surge CLI help exposes `external-resource update <key>` and `external-resource update all`, but no module directive that forcibly refreshes all external scripts when a module is updated. Versioned script URLs make each release a new resource URL, so Surge fetches the current scripts after module updates.
 - Remove old `/api/timedtext` URL Rewrite rules that delete `tlang`.
 - Keep MITM enabled for `www.youtube.com`.
 - Do not add `translate.googleapis.com` to MITM. It is called by Surge's `$httpClient` inside the script; the app traffic does not need to be decrypted there.
@@ -473,9 +474,11 @@ YouTube iOS often returns srv3 XML:
 </p>
 ```
 
-The response script preserves the timedtext XML shell, extracts visible text from nested `<s>` nodes, splits long ASR paragraphs into shorter timed `<p>` segments by punctuation, estimated display width, and token count, then writes each output segment back as a single `<s ac="0">...</s>` node.
+The response script preserves the timedtext XML shell, extracts visible text from nested `<s>` nodes, removes empty ASR roll-up spacer paragraphs such as `<p ... a="1"></p>`, splits long ASR paragraphs into shorter timed `<p>` segments by punctuation, estimated display width, and token count, then writes each output segment back as a single `<s ac="0">...</s>` node.
 
 For YouTube auto-generated captions that arrive in a left-aligned ASR window, the script also normalizes the timedtext head/window metadata: it changes the `ws id="1"` alignment toward center and moves `wp id="1"` toward a bottom-centered caption window. This targets the timedtext layout itself rather than padding the subtitle text with spaces.
+
+Bilingual line breaks are written as the XML numeric entity `&#x000A;` instead of raw newline characters. This is important for YouTube's timedtext renderer: raw whitespace may be folded into normal spacing, while `&#x000A;` is intended to survive as a real caption line break.
 
 The module exposes one Surge editable parameter through `#!arguments`: `mode`. Use `mode=dual` for source above translation, `mode=reverse` for translation above source, and `mode=single` for translation only.
 

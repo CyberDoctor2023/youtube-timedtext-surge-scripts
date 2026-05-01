@@ -24,6 +24,8 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Splitting considers punctuation, rough display width, and token count.
 - Splitting avoids one-word or two-word over-fragmentation for normal English ASR captions.
 - ASR timedtext head/window style is normalized toward bottom-centered captions.
+- Bilingual line breaks are encoded as `&#x000A;` instead of raw newlines.
+- Empty ASR roll-up spacer paragraphs are removed in translated output.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
 - Scripts pass `node --check`.

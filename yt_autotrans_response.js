@@ -4,7 +4,7 @@ const MAX_CHUNKS_PER_RESPONSE = 8;
 const MAX_SEGMENT_WIDTH = 60;
 const MAX_SEGMENT_WORDS = 10;
 const MIN_SENTENCE_WIDTH = 24;
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -175,6 +175,15 @@ function encodeXml(text) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function encodeSubtitleText(text) {
+  return String(text || "")
+    .split("\n")
+    .map(function (line) {
+      return encodeXml(line);
+    })
+    .join("&#x000A;");
 }
 
 function extractText(content) {
@@ -393,6 +402,11 @@ function splitContent(attrs, content, paragraphIndex) {
   }];
 }
 
+function isSpacerParagraph(attrs, content) {
+  const attrMap = parseAttrs(attrs);
+  return attrMap.a === "1" && !extractText(content);
+}
+
 function makeSubtitleText(sourceText, translatedText, options) {
   if (options.showOnly) {
     return translatedText;
@@ -546,7 +560,7 @@ function finish(items, translatedCount, cache, key, options) {
     }
 
     const text = makeSubtitleText(item.text, item.translated, options);
-    const xml = "<p" + item.attrs + "><s ac=\"0\">" + encodeXml(text) + "</s></p>";
+    const xml = "<p" + item.attrs + "><s ac=\"0\">" + encodeSubtitleText(text) + "</s></p>";
 
     if (!replacements[item.paragraphIndex]) {
       replacements[item.paragraphIndex] = "";
@@ -558,6 +572,10 @@ function finish(items, translatedCount, cache, key, options) {
   body = body.replace(pRegex, function (match, attrs, content) {
     const replacement = replacements[index];
     index += 1;
+
+    if (!replacement && isSpacerParagraph(attrs, content)) {
+      return "";
+    }
 
     return replacement || match;
   });
