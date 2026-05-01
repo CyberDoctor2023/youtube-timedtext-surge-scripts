@@ -1,6 +1,7 @@
 # YT AutoTrans Error
 
 ![Surge](https://img.shields.io/badge/Surge-iOS%20%2F%20Mac-18A0FB)
+![Quantumult X](https://img.shields.io/badge/Quantumult%20X-iOS%20%2F%20Mac-7A5CFF)
 ![YouTube](https://img.shields.io/badge/YouTube-TimedText-FF0000)
 ![Module](https://img.shields.io/badge/Module-sgmodule-34C759)
 ![Status](https://img.shields.io/badge/Status-Verified-brightgreen)
@@ -52,6 +53,15 @@ Surge 模块地址：
 ```text
 https://github.com/CyberDoctor2023/yt-autotrans/releases/latest/download/yt-autotrans.sgmodule
 ```
+
+Quantumult X 版本：
+
+```text
+yt_autotrans_quanx.js
+yt-autotrans.quanx.conf
+```
+
+Quantumult X 安装说明见 [docs/quantumult-x.md](docs/quantumult-x.md)。
 
 安装后请确认：
 
