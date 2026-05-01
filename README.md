@@ -1,6 +1,16 @@
-# YouTube TimedText Surge Scripts
+# YT AutoTrans
 
-Surge scripts for fixing YouTube iOS App auto-translated subtitles when `/api/timedtext` requests with `tlang` return HTTP 429.
+YT AutoTrans is a Surge module for fixing the long-running YouTube/Google auto-translated subtitle failure where `/api/timedtext` requests with `tlang` return HTTP 429 or show "error loading subtitles" in the YouTube app.
+
+This repository targets a problem that has been reported repeatedly by global users across YouTube Help Community, Reddit, ReVanced Extended, NodeSeek, and other communities. The failure has often appeared to be fixed, partially fixed, or platform-specific, but it continues to recur for real users, especially in China-mainland-facing proxy/airport environments with unclean exit IPs. YT AutoTrans fixes the Surge/iOS path by preventing the fragile `tlang` request from ever reaching YouTube, while still preserving the user's requested target language locally.
+
+In short:
+
+```text
+YouTube App asks for auto-translation -> Surge keeps tlang locally
+Surge redirects the app to a clean URL -> YouTube returns original subtitles
+Surge translates the timedtext XML locally -> YouTube App displays translated subtitles
+```
 
 The current solution has been verified with YouTube iOS timedtext traffic:
 
@@ -16,15 +26,15 @@ The current solution has been verified with YouTube iOS timedtext traffic:
 Recommended module URL:
 
 ```text
-https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/yt-autotrans.sgmodule
+https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans.sgmodule
 ```
 
 The module contains:
 
 ```ini
 [Script]
-youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/youtube_timedtext_request.js
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/youtube_timedtext_response.js
+youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/youtube_timedtext_request.js
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/youtube_timedtext_response.js
 
 [MITM]
 hostname = %APPEND% www.youtube.com
@@ -174,8 +184,8 @@ Use:
 
 ```ini
 [Script]
-youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/youtube_timedtext_request.js
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/youtube_timedtext_response.js
+youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/youtube_timedtext_request.js
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/youtube_timedtext_response.js
 
 [MITM]
 hostname = %APPEND% www.youtube.com
