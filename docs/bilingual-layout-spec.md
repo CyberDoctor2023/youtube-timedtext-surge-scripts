@@ -32,6 +32,7 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Short ASR cues are enriched with nearby context without deleting or merging source paragraphs.
 - ASR overlapping paragraph durations are clamped before the next caption starts.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
+- Response script uses a foreground-response deadline strategy: Google Translate requests time out quickly, each response translates only a small number of chunks, and slow translation returns an explicit timeout subtitle instead of waiting until the YouTube app closes the connection.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
 - The install URL points to the GitHub Release `.sgmodule` asset, and the visible module `version` argument matches the release/tag rather than a self-referential commit hash.
 - README documents current features and design tradeoffs without a long commit-by-commit history.
@@ -44,6 +45,7 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Verify Surge module parameter syntax and external-resource commands against local CLI/help.
 - Run syntax checks for request and response scripts.
 - Search README/module for stale filenames and stale option names.
+- Validate the response timeout strategy with syntax checks and real Surge timing captures where Active approaches 8 seconds.
 - Publish the matching `.sgmodule` as a GitHub Release asset for the visible version tag.
 
 ## Follow-up Todos

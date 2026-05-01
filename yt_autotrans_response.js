@@ -1,6 +1,7 @@
-const REQUEST_TIMEOUT = 5;
+const REQUEST_TIMEOUT = 2;
+const RESPONSE_DEADLINE_MS = 5000;
 const MAX_URL_LENGTH = 5000;
-const MAX_CHUNKS_PER_RESPONSE = 8;
+const MAX_CHUNKS_PER_RESPONSE = 2;
 const MAX_SEGMENT_WIDTH = 92;
 const MAX_SEGMENT_WORDS = 16;
 const MIN_SENTENCE_WIDTH = 24;
@@ -9,12 +10,13 @@ const SHORT_CONTEXT_WORDS = 16;
 const SHORT_TOKEN_LIMIT = 2;
 const SHORT_DISPLAY_WIDTH = 14;
 const SHORT_DURATION_MS = 1200;
-const CACHE_VERSION = 7;
+const CACHE_VERSION = 8;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
   position: "Forward"
 };
+const TRANSLATE_TIMEOUT_TEXT = "[YT AutoTrans] Google 翻译服务超时，请稍后重试。";
 
 let body = $response.body || "";
 let headers = Object.assign({}, $response.headers || {});
@@ -645,7 +647,18 @@ function buildChunks(items) {
   return chunks;
 }
 
-function finish(items, translatedCount, cache, key, options, useAsrLayout) {
+function markTranslateTimeout(items) {
+  for (let index = 0; index < items.length; index += 1) {
+    if (items[index].text && !items[index].translated) {
+      items[index].translated = TRANSLATE_TIMEOUT_TEXT;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function finish(items, translatedCount, cache, key, options, useAsrLayout, status) {
   let index = 0;
   const replacements = {};
 
@@ -680,7 +693,13 @@ function finish(items, translatedCount, cache, key, options, useAsrLayout) {
   writeJson(key, cache);
   normalizeHeaders();
 
-  console.log("YouTube timedtext translated: " + translatedCount + "/" + items.length);
+  console.log(
+    "YouTube timedtext translated: " +
+      translatedCount +
+      "/" +
+      items.length +
+      (status ? " (" + status + ")" : "")
+  );
 
   $done({
     body: body,
@@ -743,9 +762,23 @@ if (!meta) {
     const chunks = buildChunks(items);
     let chunkIndex = 0;
     let translatedCount = 0;
+    let failedCount = 0;
+    const startedAt = Date.now();
 
     function nextChunk() {
+      if (Date.now() - startedAt >= RESPONSE_DEADLINE_MS) {
+        markTranslateTimeout(items);
+        finish(items, translatedCount, cache, key, options, useAsrLayout, "translate timeout");
+        return;
+      }
+
       if (chunkIndex >= chunks.length) {
+        if (translatedCount === 0 && failedCount > 0) {
+          markTranslateTimeout(items);
+          finish(items, translatedCount, cache, key, options, useAsrLayout, "translate failed");
+          return;
+        }
+
         finish(items, translatedCount, cache, key, options, useAsrLayout);
         return;
       }
@@ -760,6 +793,8 @@ if (!meta) {
         function (translatedText) {
           if (translatedText) {
             translatedCount += applyMarkedTranslations(translatedText, items, cache);
+          } else {
+            failedCount += 1;
           }
 
           nextChunk();
