@@ -53,6 +53,21 @@ function parseArguments() {
     argument = $argument;
   }
 
+  const mode = String(argument.mode || argument.Mode || "").toLowerCase();
+
+  if (mode === "single" || mode === "mono" || mode === "translate" || mode === "translation-only") {
+    options.showOnly = true;
+  }
+
+  if (mode === "reverse" || mode === "target-source" || mode === "zh-en") {
+    options.position = "Reverse";
+  }
+
+  if (mode === "dual" || mode === "source-target" || mode === "en-zh") {
+    options.showOnly = false;
+    options.position = "Forward";
+  }
+
   if (
     argument.show_only === true ||
     argument.show_only === "true" ||

@@ -13,7 +13,10 @@ Add optional bilingual timedtext output for YT AutoTrans Error. The first implem
 
 ## Completion Conditions
 
-- Module exposes Surge editable parameters for bilingual mode and source/target order.
+- Module exposes one Surge editable `mode` parameter for subtitle display mode.
+- `mode=dual` means source above translation.
+- `mode=reverse` means translation above source.
+- `mode=single` means translated text only.
 - Default behavior shows source above translation.
 - Existing translation-only behavior remains available.
 - Older `bilingual/order` script arguments remain compatible.
