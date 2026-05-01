@@ -18,6 +18,14 @@
 
 这个结论来自手机端 Surge 抓包：在 iPhone 上抓取原生 YouTube App 的自动翻译字幕请求，可以看到失败链路里 `/api/timedtext?...&tlang=...` 最终返回的是 `HTTP 429`。也就是说，App 显示的“加载字幕时错误”背后不是普通 XML 替换失败，而是 YouTube timedtext 自动翻译请求在特定网络环境下被 429 拒绝。
 
+### 错误案例
+
+在 iPhone 原生 YouTube App 中，用户看到的通常只是一个简短的字幕错误提示：
+
+![YouTube App 加载字幕时出错](https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/youtube-subtitle-error.jpg)
+
+通过 Surge 抓包可以进一步确认：这个 UI 错误对应的是自动翻译字幕接口 `/api/timedtext?...&tlang=...` 的 `HTTP 429`。
+
 桌面浏览器不是本项目的主要目标。电脑用户通常可以直接使用沉浸式翻译等扩展解决字幕翻译需求。本项目主要解决苹果移动生态里 iPhone / iPad 原生 YouTube App 无法通过浏览器扩展介入的问题。
 
 ### 安装
@@ -315,6 +323,14 @@ DualSubs 主要处理字幕轨道列表和 player response；YT AutoTrans Error 
 This repository targets an issue repeatedly reported by global users across YouTube Help Community, Reddit, ReVanced Extended, NodeSeek, and other communities. The issue has appeared fixed, partially fixed, platform-specific, or network-specific at different times, but it continues to recur in real-world use. It is especially easy to reproduce in China-mainland-facing proxy environments with unclean exit IPs.
 
 This conclusion comes from mobile Surge traffic capture: when capturing the native YouTube App on iPhone, the failing auto-translate subtitle path shows `/api/timedtext?...&tlang=...` returning `HTTP 429`. In other words, the visible "error loading subtitles" message is not caused by local XML replacement failure; it is caused by YouTube timedtext auto-translate requests being rejected in affected network environments.
+
+### Error Case
+
+In the native YouTube App on iPhone, the user usually sees only a short subtitle error message:
+
+![YouTube App subtitle loading error](https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/youtube-subtitle-error.jpg)
+
+Surge traffic capture confirms that this UI error maps to `HTTP 429` from the auto-translate timedtext endpoint `/api/timedtext?...&tlang=...`.
 
 Desktop browsers are not the main target. On desktop, tools such as Immersive Translate can already solve many subtitle translation needs. This project exists for the Apple mobile ecosystem, where the native YouTube app cannot be fixed with normal browser extensions.
 
