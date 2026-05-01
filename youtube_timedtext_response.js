@@ -1,41 +1,27 @@
 let body = $response.body || "";
-const u = new URL($request.url);
 
-const subtype = u.searchParams.get("subtype");
+function getHeader(headers, name) {
+  const lower = name.toLowerCase();
 
-// 只处理 request 阶段由 tlang 改写出来的当次请求
-if (subtype !== "Translate") {
-  $done({});
-  return;
-}
-
-const regex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
-
-let count = 0;
-
-body = body.replace(regex, function (match, attrs, content) {
-  count++;
-  return "<p" + attrs + ">测试中文" + count + "</p>";
-});
-
-$done({
-  body: body,
-  headers: {
-    ...$response.headers,
-    "Content-Encoding": "identity",
-    "Content-Type": "text/xml; charset=UTF-8"
+  for (let k in headers) {
+    if (k.toLowerCase() === lower) {
+      return headers[k];
+    }
   }
-});let body = $response.body || "";
-const u = new URL($request.url);
 
-const subtype = u.searchParams.get("subtype");
+  return "";
+}
 
-// 只处理 request 阶段由 tlang 改写出来的当次请求
-if (subtype !== "Translate") {
+const hit = getHeader($request.headers || {}, "X-YT-TT-Hit");
+const target = getHeader($request.headers || {}, "X-YT-TT-Target");
+
+// 没有当次请求标记：普通字幕不改
+if (hit !== "1") {
   $done({});
   return;
 }
 
+// 有当次请求标记：只替换这一次 response
 const regex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
 
 let count = 0;
@@ -50,6 +36,7 @@ $done({
   headers: {
     ...$response.headers,
     "Content-Encoding": "identity",
-    "Content-Type": "text/xml; charset=UTF-8"
+    "Content-Type": "text/xml; charset=UTF-8",
+    "X-YT-Debug": "HEADER_HIT;target=" + target + ";count=" + count
   }
 });
