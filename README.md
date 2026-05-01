@@ -199,6 +199,123 @@ YouTube iOS 经常返回 srv3 XML：
 
 它不会强行保留原来的逐词 `<s t="...">` 分段，因为英文词级时间戳无法可靠映射到中文、日文、韩文等翻译结果。
 
+### 调试经验与踩坑记录
+
+这个项目不是一次写完的，后续围绕 YouTube iOS 自动识别字幕踩过几轮坑，最终形成了现在的处理方式。
+
+#### 1. 先证实 429，不先猜 XML
+
+最初已经验证过 response 脚本可以直接把 timedtext XML 里的 `<p>` 文本替换成中文，YouTube App 也能显示。因此核心问题不是“Surge 不能改 XML”，而是带 `tlang` 的自动翻译请求在特定网络环境下会被 YouTube timedtext 返回 `429`。这也是为什么 request 脚本只负责拦截原始 `tlang` 请求、保存语言、返回本地 302，而不把原始请求发给 YouTube。
+
+#### 2. 纯 URL Rewrite 能避开 429，但不能面向全球语言
+
+URL Rewrite 删除 `tlang` 的确能让 YouTube 返回原始字幕，但 302 后 response 阶段已经看不到原始 `tlang`，也就不知道用户选择的是中文、日文、西语还是其他语言。这个方案适合硬编码单一目标语言，不适合由 YouTube 客户端决定目标语言的全球化使用场景。
+
+#### 3. 人工字幕和 ASR 自动字幕必须隔离
+
+人工字幕通常是一段一段完整 cue；ASR 自动识别字幕常见的是 word-timed、roll-up、带 `<w>` window、`w="1"`、`<s t="...">` 的结构。早期如果把 ASR 的居中、删 spacer、切分逻辑直接套到所有字幕，会影响人工字幕。所以现在只在检测到 `kind=asr` 或 ASR-like XML 结构时启用 ASR 专属修复，人工字幕只走保守替换。
+
+#### 4. “三行字幕”不是单一原因
+
+三行字幕至少遇到过三种来源：
+
+- 原始 ASR 窗口偏左：`ws id="1"` / `wp id="1"` 指向 roll-up 风格窗口，需要把对齐改成居中，把窗口调到底部居中。
+- 双语换行写成真实换行：YouTube timedtext renderer 可能把普通换行折叠成空白，所以改为 XML 数字实体 `&#x000A;`。
+- ASR roll-up 时间轴重叠：多个 `<p>` 在同一时间段同时有效，双语后互相叠行。现在会把 ASR 输出段的 `d` 裁到下一个字幕开始前。
+
+#### 5. `a="1"` 空白段会干扰双语显示
+
+自动识别字幕里经常有空白 roll-up spacer：
+
+```xml
+<p t="3030" d="3130" w="1" a="1">
+</p>
+```
+
+这些空白段对原始单行 roll-up 字幕有意义，但双语输出后容易额外占行或触发布局异常。现在 ASR 路径会删除这种空白 spacer，人工字幕不做这个处理。
+
+#### 6. 跨 `<p>` 合并曾经试过，但已撤回
+
+为了让字幕更像自然短语，曾经尝试把相邻短 `<p>` 真正合并成一个输出段，并删除后续原始 `<p>`。这个思路可以减少“一两个词一跳”，但风险是 paragraph 映射和翻译缓存会变得脆弱，实际测试里出现过只剩 `[Music]` 等短提示字幕能稳定显示的情况。
+
+因此当前版本不再做跨 `<p>` 删除式合并。更稳的方式是：
+
+- 放宽 ASR 单段切分阈值；
+- 把窗口列宽从 `cc=40` 调到 `cc=80`；
+- 对很短的 ASR cue 做上下文补全，只改当前 cue 文本，不删除原始 `<p>`。
+
+这样可以减少机械的一词闪过，同时避免整段字幕丢失。
+
+#### 7. Surge 外部脚本更新不能只靠直觉
+
+本机 `surge-cli --help` 显示了：
+
+```text
+external-resource update <key>
+external-resource update all
+```
+
+但没有显示“模块更新时强制刷新全部脚本资源”的模块指令。所以模块侧采用了两个策略：
+
+- `script-update-interval=3600`；
+- 每次发版 bump `#!version`，并给远程脚本 URL 加 `?v=...`。
+
+这样用户更新模块时，脚本 URL 本身也变化，Surge 会把它当作新的外部资源重新拉取。
+
+### 后续迭代记录
+
+README 初版之后，项目继续围绕 iOS YouTube ASR 字幕做了多轮小步修正。下面记录这些后续变更，方便以后回溯为什么代码不是一个简单的“翻译后替换文本”。
+
+#### `2026.05.01.2`：模块资源更新与 ASR 居中
+
+- 给模块增加 `#!version`，并把远程脚本 URL 改成带 `?v=...` 的版本化地址。
+- 保留 `script-update-interval=3600`，同时用版本化 URL 解决 Surge 外部脚本资源不立即刷新的问题。
+- 给 ASR timedtext 增加 `normalizeTimedtextLayout()`：
+  - `ws id="1"` 设置为居中对齐；
+  - `wp id="1"` 设置为底部居中窗口；
+  - 保持 `w id="1"` 指向 `wp="1"` 和 `ws="1"`。
+- 这一步解决的是自动生成字幕常见的左侧/roll-up 窗口问题，但还不能单独解决三行字幕。
+
+#### `2026.05.01.3`：双语换行和空白 spacer
+
+- 把双语换行从真实换行字符改为 XML 数字实体 `&#x000A;`。
+- 删除 ASR 里的空白 roll-up spacer，例如 `<p ... a="1"></p>`。
+- 缓存版本同步升级，避免旧缓存继续输出旧格式。
+- 这一步解决了 YouTube timedtext renderer 可能折叠普通换行、以及空白 spacer 额外占行的问题。
+
+#### `2026.05.01.4`：人工字幕 / ASR 字幕隔离
+
+- 增加 ASR 检测：`kind=asr`、`<w ... wp=...>`、`w="1"` + `<s t="...">` 等结构会被视为自动识别字幕。
+- ASR 专属逻辑只在自动识别字幕上运行：
+  - 居中窗口；
+  - 删除 spacer；
+  - 按词级时间戳切分；
+  - 裁剪重叠时长。
+- 人工字幕走保守路径，只替换文本，不套 ASR 的布局修复。
+- 这一步是为了避免自动识别字幕的修复误伤已有字幕。
+
+#### `2026.05.01.5`：跨 `<p>` 合并短句，后续撤回
+
+- 曾尝试把相邻很短的 ASR `<p>` 合并成更长的字幕短语。
+- 这个方向可以减少“一两个词一跳”，但需要把多个原始 paragraph 映射到一个输出 paragraph，并删除后续 paragraph。
+- 实测发现它会让翻译缓存、marker 顺序和 paragraph 替换变脆弱，出现过只剩 `[Music]` 等短提示字幕稳定显示的情况。
+- 因此这个版本的思路被撤回，不再作为当前设计。
+
+#### `2026.05.01.6`：增加每行显示长度，恢复稳定
+
+- 撤掉跨 `<p>` 删除式合并。
+- 把 ASR 字幕窗口列宽从 `cc=40` 放宽到 `cc=80`。
+- 把内部切分阈值从较短的 `60 / 10词` 放宽到 `92 / 16词`。
+- 保留重叠时长裁剪，避免 roll-up 时间轴造成多行叠加。
+- 这一步的目标是先恢复稳定显示，再减少字幕过短。
+
+#### `2026.05.01.7`：短 cue 上下文补全
+
+- 对一两个词、显示时间很短、或显示宽度很短的 ASR cue，补入前后相邻文本作为上下文。
+- 不删除任何原始 `<p>`，不改变 paragraph 映射，只改变当前 cue 的文本内容。
+- 跳过 `[Music]` 这类方括号提示，避免把提示音效和语句混在一起。
+- 这是当前版本用来缓解“字幕太机械、单词快速闪过”的方式，比真正跨段合并更稳定。
+
 ### 缓存策略
 
 YT AutoTrans Error 使用两层缓存：
@@ -485,6 +602,103 @@ For YouTube auto-generated captions that arrive in a left-aligned ASR window, th
 Bilingual line breaks are written as the XML numeric entity `&#x000A;` instead of raw newline characters. This is important for YouTube's timedtext renderer: raw whitespace may be folded into normal spacing, while `&#x000A;` is intended to survive as a real caption line break.
 
 The module exposes one Surge editable parameter through `#!arguments`: `mode`. Use `mode=dual` for source above translation, `mode=reverse` for translation above source, and `mode=single` for translation only.
+
+### Debugging Notes
+
+This project went through several iterations after the initial README. The current design is mostly the result of real iOS captures and failed alternatives.
+
+#### 1. The XML replacement path was not the root problem
+
+Direct response-body replacement was verified early: replacing timedtext `<p>` text with Chinese test strings worked in the YouTube iOS app. The failure was not "Surge cannot rewrite XML"; the real blocker was that upstream `/api/timedtext?...&tlang=...` requests could return `429` in affected network environments.
+
+#### 2. Pure URL Rewrite avoids 429 but loses the target language
+
+Deleting `tlang` with `[URL Rewrite]` can avoid the upstream 429, but after the local 302 the response script only sees the clean URL. It no longer knows whether the user asked for Chinese, Japanese, Spanish, or another target language. That is why the module uses a request script to save `lang/tlang` before returning a local 302.
+
+#### 3. Manual captions and ASR captions must be separated
+
+Manual captions usually arrive as normal cue paragraphs. YouTube ASR captions often arrive as word-timed roll-up XML with `<w>`, `w="1"`, and nested `<s t="...">` nodes. ASR-only layout fixes are now gated behind `kind=asr` or ASR-like XML detection, while manual captions use a conservative replacement path.
+
+#### 4. The "three-line subtitle" issue had multiple causes
+
+The three-line display was not caused by only one thing:
+
+- ASR windows can be left-aligned or roll-up styled, so `ws/wp` metadata is normalized toward a bottom-centered caption window.
+- Raw newline characters may be folded by YouTube's timedtext renderer, so bilingual line breaks are emitted as `&#x000A;`.
+- ASR roll-up cues can overlap in time, so ASR output durations are clamped before the next cue starts.
+
+#### 5. Empty `a="1"` roll-up spacer paragraphs matter
+
+ASR captions often contain empty spacer paragraphs such as:
+
+```xml
+<p t="3030" d="3130" w="1" a="1">
+</p>
+```
+
+These can make sense for original roll-up captions, but they can add unwanted layout rows after bilingual rewriting. The ASR path removes them; the manual-caption path does not.
+
+#### 6. Real cross-`<p>` merging was tried and removed
+
+Merging adjacent short `<p>` cues into one output paragraph sounded attractive, but it made paragraph mapping and translation caching fragile. In testing, that approach could make most captions disappear while short hints like `[Music]` still showed. The current approach is safer: widen the ASR caption window, relax internal splitting, and enrich very short cues with nearby context without deleting source paragraphs.
+
+#### 7. External resource updates are handled by versioned script URLs
+
+The local Surge CLI help exposes `external-resource update <key>` and `external-resource update all`, but no module directive that forces all external scripts to refresh whenever a module is updated. For releases, the module therefore bumps both `#!version` and the script URL query, such as `?v=2026.05.01.7`.
+
+### Iteration Log
+
+After the first README draft, the project continued through several iOS ASR subtitle fixes. This log records what changed after the initial documentation, including the approaches that were later reverted.
+
+#### `2026.05.01.2`: resource versioning and ASR centering
+
+- Added `#!version` to the module and versioned remote script URLs with `?v=...`.
+- Kept `script-update-interval=3600`, while using the URL version query to force a fresh external script resource after module updates.
+- Added `normalizeTimedtextLayout()` for ASR timedtext:
+  - center-align `ws id="1"`;
+  - move `wp id="1"` toward a bottom-centered caption window;
+  - keep `w id="1"` bound to `wp="1"` and `ws="1"`.
+- This addressed left-aligned or roll-up ASR windows, but did not fully solve the three-line display by itself.
+
+#### `2026.05.01.3`: bilingual line breaks and spacer removal
+
+- Changed bilingual line breaks from raw newline characters to the XML numeric entity `&#x000A;`.
+- Removed empty ASR roll-up spacer paragraphs such as `<p ... a="1"></p>`.
+- Bumped the cache version so stale translated output would not keep the old layout.
+- This fixed raw-newline folding and spacer rows that could create extra visual lines.
+
+#### `2026.05.01.4`: manual caption / ASR isolation
+
+- Added ASR detection through `kind=asr`, `<w ... wp=...>`, and `w="1"` plus nested `<s t="...">`.
+- Limited ASR-only behavior to auto-generated captions:
+  - layout normalization;
+  - spacer removal;
+  - word-timed splitting;
+  - overlapping-duration clamping.
+- Manual captions use the conservative replacement path.
+- This prevented ASR-specific fixes from affecting existing human-authored captions.
+
+#### `2026.05.01.5`: cross-`<p>` short cue merging, later removed
+
+- Tried merging adjacent short ASR `<p>` cues into longer phrases.
+- This reduced one-word flashes, but required mapping multiple source paragraphs to one output paragraph and deleting later paragraphs.
+- In real testing, the mapping and cache became fragile; most captions could disappear while short hints like `[Music]` still appeared.
+- This strategy was removed and is not part of the current design.
+
+#### `2026.05.01.6`: wider caption lines for stability
+
+- Removed cross-`<p>` deletion-style merging.
+- Widened the ASR caption window from `cc=40` to `cc=80`.
+- Relaxed internal splitting from roughly `60 / 10 words` to `92 / 16 words`.
+- Kept overlapping-duration clamping for roll-up timelines.
+- The goal was to restore stable display first, then reduce overly short cues.
+
+#### `2026.05.01.7`: context enrichment for short cues
+
+- Very short ASR cues now borrow nearby context from adjacent cues.
+- No source paragraph is deleted, and paragraph mapping remains stable.
+- Bracket cues such as `[Music]` are skipped so sound-effect labels do not get mixed into spoken lines.
+- This is the current approach for reducing mechanical one-word flashes without reintroducing the cross-paragraph merge failure.
 
 ### Cache Strategy
 
