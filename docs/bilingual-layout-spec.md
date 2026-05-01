@@ -32,7 +32,7 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Short ASR cues are enriched with nearby context without deleting or merging source paragraphs.
 - ASR overlapping paragraph durations are clamped before the next caption starts.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
-- Response script uses a foreground-response deadline strategy: Google Translate requests time out quickly, each response translates only a small number of chunks, and slow translation returns an explicit timeout subtitle instead of waiting until the YouTube app closes the connection.
+- Response script uses a foreground-response deadline strategy: Google Translate requests time out quickly, up to 8 chunks are translated in parallel to preserve seek coverage, and slow translation returns an explicit timeout subtitle instead of waiting until the YouTube app closes the connection.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
 - The install URL points to the GitHub Release `.sgmodule` asset, and the visible module `version` argument matches the release/tag rather than a self-referential commit hash.
 - README documents current features and design tradeoffs without a long commit-by-commit history.

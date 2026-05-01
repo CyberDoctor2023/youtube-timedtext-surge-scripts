@@ -1,7 +1,7 @@
 const REQUEST_TIMEOUT = 2;
 const RESPONSE_DEADLINE_MS = 5000;
 const MAX_URL_LENGTH = 5000;
-const MAX_CHUNKS_PER_RESPONSE = 2;
+const MAX_CHUNKS_PER_RESPONSE = 8;
 const MAX_SEGMENT_WIDTH = 92;
 const MAX_SEGMENT_WORDS = 16;
 const MIN_SENTENCE_WIDTH = 24;
@@ -10,7 +10,7 @@ const SHORT_CONTEXT_WORDS = 16;
 const SHORT_TOKEN_LIMIT = 2;
 const SHORT_DISPLAY_WIDTH = 14;
 const SHORT_DURATION_MS = 1200;
-const CACHE_VERSION = 8;
+const CACHE_VERSION = 9;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -760,48 +760,59 @@ if (!meta) {
     finish(items, 0, cache, key, options, useAsrLayout);
   } else {
     const chunks = buildChunks(items);
-    let chunkIndex = 0;
+    let completedCount = 0;
     let translatedCount = 0;
     let failedCount = 0;
     const startedAt = Date.now();
+    let finished = false;
 
-    function nextChunk() {
-      if (Date.now() - startedAt >= RESPONSE_DEADLINE_MS) {
+    function complete(status) {
+      if (finished) {
+        return;
+      }
+
+      finished = true;
+
+      if (translatedCount === 0 && status) {
         markTranslateTimeout(items);
-        finish(items, translatedCount, cache, key, options, useAsrLayout, "translate timeout");
-        return;
       }
 
-      if (chunkIndex >= chunks.length) {
-        if (translatedCount === 0 && failedCount > 0) {
-          markTranslateTimeout(items);
-          finish(items, translatedCount, cache, key, options, useAsrLayout, "translate failed");
-          return;
-        }
-
-        finish(items, translatedCount, cache, key, options, useAsrLayout);
-        return;
-      }
-
-      const chunk = chunks[chunkIndex];
-      chunkIndex += 1;
-
-      translateText(
-        makeMarkedText(chunk),
-        meta.sourceLang || "auto",
-        meta.targetLang,
-        function (translatedText) {
-          if (translatedText) {
-            translatedCount += applyMarkedTranslations(translatedText, items, cache);
-          } else {
-            failedCount += 1;
-          }
-
-          nextChunk();
-        }
-      );
+      finish(items, translatedCount, cache, key, options, useAsrLayout, status);
     }
 
-    nextChunk();
+    function completeOne(translatedText) {
+      if (finished) {
+        return;
+      }
+
+      if (translatedText) {
+        translatedCount += applyMarkedTranslations(translatedText, items, cache);
+      } else {
+        failedCount += 1;
+      }
+
+      completedCount += 1;
+
+      if (completedCount >= chunks.length) {
+        complete(translatedCount === 0 && failedCount > 0 ? "translate failed" : "");
+      }
+    }
+
+    if (chunks.length === 0) {
+      finish(items, translatedCount, cache, key, options, useAsrLayout);
+    } else {
+      setTimeout(function () {
+        complete("translate timeout");
+      }, RESPONSE_DEADLINE_MS);
+
+      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+        translateText(
+          makeMarkedText(chunks[chunkIndex]),
+          meta.sourceLang || "auto",
+          meta.targetLang,
+          completeOne
+        );
+      }
+    }
   }
 }

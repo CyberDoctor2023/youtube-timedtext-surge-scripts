@@ -66,7 +66,7 @@ https://github.com/CyberDoctor2023/yt-autotrans/releases/latest/download/yt-auto
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `mode` | `dual` | 字幕显示模式 |
-| `version` | `v2026.05.01.8` | 只用于在 Surge 中对照 GitHub Release 版本，脚本不会读取 |
+| `version` | `v2026.05.01.9` | 只用于在 Surge 中对照 GitHub Release 版本，脚本不会读取 |
 
 `mode` 可选值：
 
@@ -120,7 +120,7 @@ YouTube App 显示翻译字幕
   本机 `surge-cli --help` 能看到 `external-resource update <key>` 和 `external-resource update all`，但没有模块级“安装时强制刷新全部外部脚本”的指令。因此模块同时使用 `script-update-interval=3600`、`#!version` 和脚本 URL 的 `?v=...`，让每次发版都对应新的外部资源 URL。
 
 - **为什么要限制翻译耗时？**
-  timedtext 是 YouTube App 正在等待的字幕响应，不是后台任务。真实抓包显示，当 Active 接近 8 秒时客户端可能直接断开。因此当前版本把 Google 翻译单请求 timeout 收紧到 2 秒、每轮最多翻译 2 个 chunk，并设置 5 秒 response 预算；超过预算会尽快返回，并在字幕中写入 `[YT AutoTrans] Google 翻译服务超时，请稍后重试。`，方便判断是翻译服务慢，而不是 YouTube 429。
+  timedtext 是 YouTube App 正在等待的字幕响应，不是后台任务。真实抓包显示，当 Active 接近 8 秒时客户端可能直接断开。因此当前版本把 Google 翻译单请求 timeout 收紧到 2 秒，并把最多 8 个 chunk 并行发出，在 5 秒 response 预算内尽量建立完整字幕缓存；超过预算会尽快返回，并在字幕中写入 `[YT AutoTrans] Google 翻译服务超时，请稍后重试。`，方便判断是翻译服务慢，而不是 YouTube 429。
 
 ### 字幕处理
 
@@ -161,7 +161,7 @@ cleanUrl + targetLang -> translated paragraph map
 Surge `http-response` 脚本不能一边翻译一边分段回传，只能在处理完后一次性 `$done(...)`。因此本模块采用渐进缓存策略：
 
 - 有缓存的段落立即使用。
-- 每次 response 只翻译有限数量的新段落，当前版本首轮最多 2 个 chunk。
+- 每次 response 只翻译有限数量的新段落，当前版本最多 8 个 chunk，并行请求以尽量兼顾首屏速度和拖进度条后的缓存覆盖。
 - 新翻译写入缓存。
 - 同一个视频、同一个目标语言后续请求会逐步补全。
 
@@ -266,7 +266,7 @@ The module uses Surge `#!arguments`. Defaults are usable as-is.
 | Option | Default | Description |
 | --- | --- | --- |
 | `mode` | `dual` | Subtitle display mode |
-| `version` | `v2026.05.01.8` | Visible GitHub Release marker only; scripts do not read it |
+| `version` | `v2026.05.01.9` | Visible GitHub Release marker only; scripts do not read it |
 
 `mode` values:
 
@@ -318,7 +318,7 @@ YouTube App displays translated subtitles
   The local Surge CLI exposes `external-resource update <key>` and `external-resource update all`, but no module directive that forces script refresh on install. Releases therefore bump `#!version` and script URL `?v=...`, while also using `script-update-interval=3600`.
 
 - **Why enforce a translation deadline?**
-  Timedtext is a foreground subtitle response that the YouTube app is actively waiting for. Real captures show the client can close the connection when `Active` approaches about 8 seconds. The current version uses a 2-second Google Translate request timeout, translates at most 2 chunks per response, and keeps a 5-second response budget. If that budget is exceeded, the script returns quickly and writes `[YT AutoTrans] Google 翻译服务超时，请稍后重试。` into the subtitle so the failure is distinguishable from YouTube 429.
+  Timedtext is a foreground subtitle response that the YouTube app is actively waiting for. Real captures show the client can close the connection when `Active` approaches about 8 seconds. The current version uses a 2-second Google Translate request timeout, sends up to 8 chunks in parallel, and keeps a 5-second response budget. This preserves the original "build as much cache as possible" behavior while avoiding long serial waits. If the budget is exceeded, the script returns quickly and writes `[YT AutoTrans] Google 翻译服务超时，请稍后重试。` into the subtitle so the failure is distinguishable from YouTube 429.
 
 ### TimedText Handling
 
@@ -356,7 +356,7 @@ cleanUrl -> { sourceLang, targetLang, expiresAt }
 cleanUrl + targetLang -> translated paragraph map
 ```
 
-Surge `http-response` scripts cannot stream subtitle chunks back progressively; they must call `$done(...)` once. The practical strategy is progressive caching: use cached lines immediately, translate at most 2 new chunks per response in the current version, and reuse cached translations on later requests for the same video and target language.
+Surge `http-response` scripts cannot stream subtitle chunks back progressively; they must call `$done(...)` once. The practical strategy is progressive caching: use cached lines immediately, translate up to 8 new chunks in parallel in the current version, and reuse cached translations on later requests for the same video and target language.
 
 ### Verification
 
