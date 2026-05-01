@@ -1,49 +1,105 @@
-let url = $request.url;
+const TARGET_LANG = "zh-CN";
+let body = $response.body || "";
 
-function getParam(u, name) {
-  const m = u.match(new RegExp("[?&]" + name + "=([^&]+)"));
-  return m ? decodeURIComponent(m[1]) : "";
+function decodeXml(str) {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&nbsp;/g, " ");
 }
 
-function removeParam(u, name) {
-  const qIndex = u.indexOf("?");
-  if (qIndex === -1) return u;
-
-  const base = u.slice(0, qIndex);
-  const query = u.slice(qIndex + 1);
-
-  const kept = query
-    .split("&")
-    .filter(function (part) {
-      if (!part) return false;
-      return part.split("=")[0] !== name;
-    });
-
-  return kept.length ? base + "?" + kept.join("&") : base;
+function encodeXml(str) {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-const target = getParam(url, "tlang");
+function translateOne(text, callback) {
+  const url =
+    "https://translate.googleapis.com/translate_a/single" +
+    "?client=gtx" +
+    "&sl=auto" +
+    "&tl=" + TARGET_LANG +
+    "&dt=t" +
+    "&q=" + encodeURIComponent(text);
 
-if (!target) {
-  $done({});
+  $httpClient.get(url, function (error, response, data) {
+    if (error || !data) {
+      console.log("翻译失败，保留原文: " + text);
+      callback(text);
+      return;
+    }
+
+    try {
+      const json = JSON.parse(data);
+      const translated = json[0].map(x => x[0]).join("");
+      callback(translated || text);
+    } catch (e) {
+      console.log("翻译解析失败，保留原文: " + e);
+      callback(text);
+    }
+  });
+}
+
+const regex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
+const matches = [...body.matchAll(regex)];
+
+if (!matches.length) {
+  console.log("没找到 <p> 字幕节点");
+  $done({ body });
 } else {
-  let newUrl = removeParam(url, "tlang");
-  newUrl = removeParam(newUrl, "_yt_x");
-  newUrl = removeParam(newUrl, "_yt_trg");
-  newUrl = removeParam(newUrl, "subtype");
-  newUrl = removeParam(newUrl, "dst");
+  console.log("找到字幕条数: " + matches.length);
 
-  let headers = {};
-  for (let k in $request.headers) {
-    headers[k] = $request.headers[k];
-  }
+  let originals = matches.map(m =>
+    decodeXml(m[2]).replace(/\s+/g, " ").trim()
+  );
 
-  // 只标记当前这一次请求
-  headers["X-YT-TT-Hit"] = "1";
-  headers["X-YT-TT-Target"] = target;
+  let translated = new Array(originals.length);
+  let finished = 0;
 
-  $done({
-    url: newUrl,
-    headers: headers
+  originals.forEach((text, index) => {
+    if (!text) {
+      translated[index] = "";
+      finished++;
+      return;
+    }
+
+    translateOne(text, function (zh) {
+      translated[index] = zh;
+      finished++;
+
+      if (finished === originals.length) {
+        let i = 0;
+
+        body = body.replace(regex, function (match, attrs, content) {
+          const original = decodeXml(content).replace(/\s+/g, " ").trim();
+
+          if (!original) return match;
+
+          const zh = translated[i] || original;
+          i++;
+
+          return `<p${attrs}>${encodeXml(zh)}</p>`;
+        });
+
+        console.log("字幕翻译完成，替换数量: " + i);
+
+        $done({
+          body,
+          headers: {
+            ...$response.headers,
+            "Content-Encoding": "identity",
+            "Content-Type": "text/xml; charset=UTF-8"
+          }
+        });
+      }
+    });
   });
 }
