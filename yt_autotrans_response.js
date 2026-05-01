@@ -13,7 +13,7 @@ const SHORT_CONTEXT_WORDS = 16;
 const SHORT_TOKEN_LIMIT = 2;
 const SHORT_DISPLAY_WIDTH = 14;
 const SHORT_DURATION_MS = 1200;
-const CACHE_VERSION = 18;
+const CACHE_VERSION = 19;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -773,8 +773,10 @@ function selfReload(cache, cacheStateKey, reloadStateKey) {
     response: {
       status: 302,
       headers: {
-        Location: $request.url,
-        "Cache-Control": "no-cache",
+        Location: canonicalTimedtextUrl($request.url),
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
         "Content-Type": "text/plain; charset=UTF-8",
         "X-YT-AutoTrans": "self-reload"
       },
@@ -826,6 +828,9 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
 
   writeJson(key, cache);
   normalizeHeaders();
+  headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+  headers.Pragma = "no-cache";
+  headers.Expires = "0";
   headers["X-YT-AutoTrans"] =
     "items=" +
     items.length +

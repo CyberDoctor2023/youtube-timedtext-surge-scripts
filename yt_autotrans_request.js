@@ -71,17 +71,19 @@ try {
       url.searchParams.delete("tlang");
 
       const cleanUrl = url.toString();
+      const redirectUrl = canonicalTimedtextUrl(cleanUrl);
       const meta = {
         sourceLang: sourceLang,
         targetLang: targetLang,
-        cleanUrl: cleanUrl,
+        cleanUrl: redirectUrl,
         createdAt: Date.now(),
         expiresAt: Date.now() + META_TTL_MS
       };
 
       $persistentStore.write(JSON.stringify(meta), metaKey(cleanUrl));
-      $persistentStore.write(JSON.stringify(meta), metaKey(canonicalTimedtextUrl(cleanUrl)));
+      $persistentStore.write(JSON.stringify(meta), metaKey(redirectUrl));
       $persistentStore.write(JSON.stringify(meta), trackMetaKey(cleanUrl));
+      $persistentStore.write(JSON.stringify(meta), trackMetaKey(redirectUrl));
 
       console.log(
         "YouTube timedtext redirect cached: " +
@@ -94,8 +96,10 @@ try {
         response: {
           status: 302,
           headers: {
-            Location: cleanUrl,
-            "Cache-Control": "no-cache",
+            Location: redirectUrl,
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            Pragma: "no-cache",
+            Expires: "0",
             "Content-Type": "text/plain; charset=UTF-8"
           },
           body: ""
