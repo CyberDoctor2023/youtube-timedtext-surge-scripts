@@ -1,10 +1,15 @@
 const REQUEST_TIMEOUT = 3;
 const RESPONSE_DEADLINE_MS = 7500;
+const LONG_TRACK_DEADLINE_MS = 2500;
 const MAX_URL_LENGTH = 5000;
 const MAX_CHUNKS_PER_RESPONSE = 24;
+const MAX_LONG_TRACK_CHUNKS = 4;
 const MAX_PARALLEL_REQUESTS = 4;
+const MAX_LONG_TRACK_PARALLEL_REQUESTS = 2;
 const MAX_SELF_RELOADS = 3;
 const RELOAD_TTL_MS = 60 * 1000;
+const LONG_TRACK_BODY_LENGTH = 240000;
+const LONG_TRACK_ITEM_COUNT = 900;
 const MAX_SEGMENT_WIDTH = 92;
 const MAX_SEGMENT_WORDS = 16;
 const MIN_SENTENCE_WIDTH = 24;
@@ -600,6 +605,36 @@ function normalizeHeaders() {
   headers["Content-Type"] = "text/xml; charset=UTF-8";
 }
 
+function isChunkedResponse() {
+  const value = headers["Transfer-Encoding"] || headers["transfer-encoding"] || "";
+  return String(value).toLowerCase().indexOf("chunked") !== -1;
+}
+
+function makePlan(items, input) {
+  const longTrack =
+    String(input || "").length >= LONG_TRACK_BODY_LENGTH ||
+    items.length >= LONG_TRACK_ITEM_COUNT ||
+    isChunkedResponse();
+
+  if (!longTrack) {
+    return {
+      longTrack: false,
+      deadlineMs: RESPONSE_DEADLINE_MS,
+      maxChunks: MAX_CHUNKS_PER_RESPONSE,
+      maxParallelRequests: MAX_PARALLEL_REQUESTS,
+      allowSelfReload: true
+    };
+  }
+
+  return {
+    longTrack: true,
+    deadlineMs: LONG_TRACK_DEADLINE_MS,
+    maxChunks: MAX_LONG_TRACK_CHUNKS,
+    maxParallelRequests: MAX_LONG_TRACK_PARALLEL_REQUESTS,
+    allowSelfReload: false
+  };
+}
+
 function parseGoogleTranslate(data) {
   const json = JSON.parse(data);
   let result = "";
@@ -673,10 +708,11 @@ function applyMarkedTranslations(translatedText, items, cache) {
   return count;
 }
 
-function buildChunks(items) {
+function buildChunks(items, maxChunks) {
   const chunks = [];
   let current = [];
   let currentText = "";
+  const limit = maxChunks || MAX_CHUNKS_PER_RESPONSE;
 
   for (let index = 0; index < items.length; index += 1) {
     if (!items[index].text || items[index].translated) {
@@ -703,12 +739,12 @@ function buildChunks(items) {
       currentText = nextText;
     }
 
-    if (chunks.length >= MAX_CHUNKS_PER_RESPONSE) {
+    if (chunks.length >= limit) {
       break;
     }
   }
 
-  if (current.length > 0 && chunks.length < MAX_CHUNKS_PER_RESPONSE) {
+  if (current.length > 0 && chunks.length < limit) {
     chunks.push(current);
   }
 
@@ -753,8 +789,9 @@ function countCachedItems(items) {
   return count;
 }
 
-function shouldSelfReload(items, translatedCount, reloadStateKey) {
+function shouldSelfReload(items, translatedCount, reloadStateKey, allowSelfReload) {
   return (
+    allowSelfReload !== false &&
     translatedCount > 0 &&
     countUntranslatedItems(items) > 0 &&
     getReloadCount(reloadStateKey) < MAX_SELF_RELOADS
@@ -789,7 +826,7 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
   let index = 0;
   const replacements = {};
 
-  if (shouldSelfReload(items, translatedCount, reloadStateKey)) {
+  if (shouldSelfReload(items, translatedCount, reloadStateKey, !stats || stats.allowSelfReload !== false)) {
     selfReload(cache, key, reloadStateKey);
     return;
   }
@@ -834,6 +871,7 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
   headers["X-YT-AutoTrans"] =
     "items=" +
     items.length +
+    (stats && stats.longTrack ? ";long=1" : "") +
     ";cached=" +
     countCachedItems(items) +
     ";requested=" +
@@ -844,6 +882,7 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
     (stats ? stats.failed : 0) +
     ";missing=" +
     countUntranslatedItems(items) +
+    (stats && stats.deadlineMs ? ";budget=" + stats.deadlineMs + "ms" : "") +
     (status ? ";status=" + status : "");
 
   console.log(
@@ -913,6 +952,8 @@ if (!meta) {
     clampOverlappingDurations(items);
   }
 
+  const plan = makePlan(items, body);
+
   for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
     items[itemIndex].translated = items[itemIndex].text ? cache.items[String(itemIndex)] || "" : "";
   }
@@ -920,10 +961,13 @@ if (!meta) {
   if (items.length === 0) {
     finish(items, 0, cache, key, reloadStateKey, options, useAsrLayout, "", {
       requested: 0,
-      failed: 0
+      failed: 0,
+      longTrack: plan.longTrack,
+      deadlineMs: plan.deadlineMs,
+      allowSelfReload: plan.allowSelfReload
     });
   } else {
-    const chunks = buildChunks(items);
+    const chunks = buildChunks(items, plan.maxChunks);
     let completedCount = 0;
     let translatedCount = 0;
     let failedCount = 0;
@@ -940,12 +984,19 @@ if (!meta) {
       finished = true;
 
       if (translatedCount === 0 && status) {
-        markTranslateTimeoutTrack(items);
+        if (plan.longTrack) {
+          status = status + ";fast-return";
+        } else {
+          markTranslateTimeoutTrack(items);
+        }
       }
 
       finish(items, translatedCount, cache, key, reloadStateKey, options, useAsrLayout, status, {
         requested: completedCount,
-        failed: failedCount
+        failed: failedCount,
+        longTrack: plan.longTrack,
+        deadlineMs: plan.deadlineMs,
+        allowSelfReload: plan.allowSelfReload
       });
     }
 
@@ -972,9 +1023,9 @@ if (!meta) {
     function startNextChunks() {
       while (
         !finished &&
-        activeCount < MAX_PARALLEL_REQUESTS &&
+        activeCount < plan.maxParallelRequests &&
         nextChunkIndex < chunks.length &&
-        Date.now() - startedAt < RESPONSE_DEADLINE_MS
+        Date.now() - startedAt < plan.deadlineMs
       ) {
         const chunk = chunks[nextChunkIndex];
         nextChunkIndex += 1;
@@ -995,12 +1046,15 @@ if (!meta) {
     if (chunks.length === 0) {
       finish(items, translatedCount, cache, key, reloadStateKey, options, useAsrLayout, "", {
         requested: 0,
-        failed: 0
+        failed: 0,
+        longTrack: plan.longTrack,
+        deadlineMs: plan.deadlineMs,
+        allowSelfReload: plan.allowSelfReload
       });
     } else {
       setTimeout(function () {
         complete("translate timeout");
-      }, RESPONSE_DEADLINE_MS);
+      }, plan.deadlineMs);
 
       startNextChunks();
     }
