@@ -4,7 +4,7 @@ const MAX_CHUNKS_PER_RESPONSE = 8;
 const MAX_SEGMENT_WIDTH = 60;
 const MAX_SEGMENT_WORDS = 10;
 const MIN_SENTENCE_WIDTH = 24;
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -261,6 +261,14 @@ function normalizeTimedtextLayout(input) {
   return output;
 }
 
+function isAutomaticCaption(input, url) {
+  return (
+    /[?&]kind=asr(?:&|$)/.test(String(url || "")) ||
+    /<w\b[^>]*\bwp="/.test(input) ||
+    (/<p\b[^>]*\bw="1"/.test(input) && /<s\b[^>]*\bt="/.test(input))
+  );
+}
+
 function extractSegments(content, duration) {
   const segments = [];
   let match;
@@ -335,12 +343,12 @@ function shouldSplitSegment(currentText, nextText, tokenTotal, previousEndedSent
   );
 }
 
-function splitContent(attrs, content, paragraphIndex) {
+function splitContent(attrs, content, paragraphIndex, shouldSplit) {
   const attrMap = parseAttrs(attrs);
   const duration = Number(attrMap.d || 0);
   const segments = extractSegments(content, duration);
 
-  if (segments.length <= 1) {
+  if (!shouldSplit || segments.length <= 1) {
     return [{
       paragraphIndex: paragraphIndex,
       attrs: attrs,
@@ -405,6 +413,27 @@ function splitContent(attrs, content, paragraphIndex) {
 function isSpacerParagraph(attrs, content) {
   const attrMap = parseAttrs(attrs);
   return attrMap.a === "1" && !extractText(content);
+}
+
+function clampOverlappingDurations(items) {
+  for (let index = 0; index < items.length - 1; index += 1) {
+    const attrs = parseAttrs(items[index].attrs);
+    const nextAttrs = parseAttrs(items[index + 1].attrs);
+    const start = Number(attrs.t);
+    const duration = Number(attrs.d);
+    const nextStart = Number(nextAttrs.t);
+
+    if (
+      !isNaN(start) &&
+      !isNaN(duration) &&
+      !isNaN(nextStart) &&
+      nextStart > start &&
+      start + duration > nextStart
+    ) {
+      attrs.d = String(Math.max(1, nextStart - start));
+      items[index].attrs = buildAttrs(attrs);
+    }
+  }
 }
 
 function makeSubtitleText(sourceText, translatedText, options) {
@@ -548,7 +577,7 @@ function buildChunks(items) {
   return chunks;
 }
 
-function finish(items, translatedCount, cache, key, options) {
+function finish(items, translatedCount, cache, key, options, useAsrLayout) {
   let index = 0;
   const replacements = {};
 
@@ -573,7 +602,7 @@ function finish(items, translatedCount, cache, key, options) {
     const replacement = replacements[index];
     index += 1;
 
-    if (!replacement && isSpacerParagraph(attrs, content)) {
+    if (useAsrLayout && !replacement && isSpacerParagraph(attrs, content)) {
       return "";
     }
 
@@ -609,13 +638,21 @@ if (!meta) {
   const key = cacheKey($request.url, meta.targetLang);
   const cache = getTranslationCache(key);
   const items = [];
+  const useAsrLayout = isAutomaticCaption(body, $request.url);
   let match;
   let paragraphIndex = 0;
 
-  body = normalizeTimedtextLayout(body);
+  if (useAsrLayout) {
+    body = normalizeTimedtextLayout(body);
+  }
 
   while ((match = pRegex.exec(body)) !== null) {
-    const splitItems = splitContent(match[1], match[2], paragraphIndex);
+    if (useAsrLayout && isSpacerParagraph(match[1], match[2])) {
+      paragraphIndex += 1;
+      continue;
+    }
+
+    const splitItems = splitContent(match[1], match[2], paragraphIndex, useAsrLayout);
     paragraphIndex += 1;
 
     for (let splitIndex = 0; splitIndex < splitItems.length; splitIndex += 1) {
@@ -627,8 +664,12 @@ if (!meta) {
     }
   }
 
+  if (useAsrLayout) {
+    clampOverlappingDurations(items);
+  }
+
   if (items.length === 0) {
-    finish(items, 0, cache, key, options);
+    finish(items, 0, cache, key, options, useAsrLayout);
   } else {
     const chunks = buildChunks(items);
     let chunkIndex = 0;
@@ -636,7 +677,7 @@ if (!meta) {
 
     function nextChunk() {
       if (chunkIndex >= chunks.length) {
-        finish(items, translatedCount, cache, key, options);
+        finish(items, translatedCount, cache, key, options, useAsrLayout);
         return;
       }
 
