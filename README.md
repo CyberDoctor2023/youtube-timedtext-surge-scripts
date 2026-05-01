@@ -35,7 +35,7 @@
 Surge 模块地址：
 
 ```text
-https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans.sgmodule
+https://github.com/CyberDoctor2023/yt-autotrans/releases/latest/download/yt-autotrans.sgmodule
 ```
 
 模块内容：
@@ -46,8 +46,8 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 #!system=ios
 #!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
 #!version=2026.05.01.7
-#!arguments=mode:dual,github:d934132
-#!arguments-desc=[GitHub 版本 / GitHub Version]\n\ngithub=d934132：用于和 GitHub commit 对照；脚本不会读取这个参数 / For checking against the GitHub commit. Scripts do not read this parameter.\n\n[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
+#!arguments=mode:dual,version:v2026.05.01.7
+#!arguments-desc=[版本 / Version]\n\nversion=v2026.05.01.7：用于和 GitHub tag/release 对照；脚本不会读取这个参数 / For checking against the GitHub tag or release. Scripts do not read this parameter.\n\n[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
 
 [Script]
 youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=3600,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js?v=2026.05.01.7
@@ -61,7 +61,7 @@ hostname = %APPEND% www.youtube.com
 
 - Surge 的模块/脚本列表里名称可能不够醒目，因此模块头部包含 `#!icon`。图标使用红色禁止符号和 `429`，用于直接表达“修复 YouTube 自动翻译字幕 429 错误”。
 - 模块使用 Surge 参数表。主要可调参数是 `mode`，默认值是 `dual`，不手动填写也会启用双语模式。
-- 参数表里还包含 `github`，默认值是 GitHub commit short SHA，方便在 Surge 客户端里对照是否已经更新；脚本不会读取它。
+- 参数表里还包含 `version`，默认值对应 GitHub tag/release，方便在 Surge 客户端里对照是否已经更新；脚本不会读取它。
 - `mode=dual`：双语，原文在上、译文在下，英译中时就是“英中”。`mode=reverse`：双语，译文在上、原文在下，英译中时就是“中英”。`mode=single`：单语，只显示译文。
 - 远程脚本设置了 `script-update-interval=3600`，并带有版本参数 `?v=...`。Surge CLI 的 `--help` 只显示了 `external-resource update <key>` 和 `external-resource update all`，没有显示“模块更新时强制刷新全部脚本资源”的模块指令；因此本模块通过 bump `#!version` 和脚本 URL 版本号，让模块更新时脚本 URL 也变化，从而触发重新拉取。
 - 删除旧的、用于删除 `/api/timedtext` 里 `tlang` 的 URL Rewrite。
@@ -200,151 +200,14 @@ YouTube iOS 经常返回 srv3 XML：
 
 它不会强行保留原来的逐词 `<s t="...">` 分段，因为英文词级时间戳无法可靠映射到中文、日文、韩文等翻译结果。
 
-### 调试经验与踩坑记录
+### 设计取舍
 
-这个项目不是一次写完的，后续围绕 YouTube iOS 自动识别字幕踩过几轮坑，最终形成了现在的处理方式。
-
-#### 1. 先证实 429，不先猜 XML
-
-最初已经验证过 response 脚本可以直接把 timedtext XML 里的 `<p>` 文本替换成中文，YouTube App 也能显示。因此核心问题不是“Surge 不能改 XML”，而是带 `tlang` 的自动翻译请求在特定网络环境下会被 YouTube timedtext 返回 `429`。这也是为什么 request 脚本只负责拦截原始 `tlang` 请求、保存语言、返回本地 302，而不把原始请求发给 YouTube。
-
-#### 2. 纯 URL Rewrite 能避开 429，但不能面向全球语言
-
-URL Rewrite 删除 `tlang` 的确能让 YouTube 返回原始字幕，但 302 后 response 阶段已经看不到原始 `tlang`，也就不知道用户选择的是中文、日文、西语还是其他语言。这个方案适合硬编码单一目标语言，不适合由 YouTube 客户端决定目标语言的全球化使用场景。
-
-#### 3. 人工字幕和 ASR 自动字幕必须隔离
-
-人工字幕通常是一段一段完整 cue；ASR 自动识别字幕常见的是 word-timed、roll-up、带 `<w>` window、`w="1"`、`<s t="...">` 的结构。早期如果把 ASR 的居中、删 spacer、切分逻辑直接套到所有字幕，会影响人工字幕。所以现在只在检测到 `kind=asr` 或 ASR-like XML 结构时启用 ASR 专属修复，人工字幕只走保守替换。
-
-#### 4. “三行字幕”不是单一原因
-
-三行字幕至少遇到过三种来源：
-
-- 原始 ASR 窗口偏左：`ws id="1"` / `wp id="1"` 指向 roll-up 风格窗口，需要把对齐改成居中，把窗口调到底部居中。
-- 双语换行写成真实换行：YouTube timedtext renderer 可能把普通换行折叠成空白，所以改为 XML 数字实体 `&#x000A;`。
-- ASR roll-up 时间轴重叠：多个 `<p>` 在同一时间段同时有效，双语后互相叠行。现在会把 ASR 输出段的 `d` 裁到下一个字幕开始前。
-
-#### 5. `a="1"` 空白段会干扰双语显示
-
-自动识别字幕里经常有空白 roll-up spacer：
-
-```xml
-<p t="3030" d="3130" w="1" a="1">
-</p>
-```
-
-这些空白段对原始单行 roll-up 字幕有意义，但双语输出后容易额外占行或触发布局异常。现在 ASR 路径会删除这种空白 spacer，人工字幕不做这个处理。
-
-#### 6. 跨 `<p>` 合并曾经试过，但已撤回
-
-为了让字幕更像自然短语，曾经尝试把相邻短 `<p>` 真正合并成一个输出段，并删除后续原始 `<p>`。这个思路可以减少“一两个词一跳”，但风险是 paragraph 映射和翻译缓存会变得脆弱，实际测试里出现过只剩 `[Music]` 等短提示字幕能稳定显示的情况。
-
-因此当前版本不再做跨 `<p>` 删除式合并。更稳的方式是：
-
-- 放宽 ASR 单段切分阈值；
-- 把窗口列宽从 `cc=40` 调到 `cc=80`；
-- 对很短的 ASR cue 做上下文补全，只改当前 cue 文本，不删除原始 `<p>`。
-
-这样可以减少机械的一词闪过，同时避免整段字幕丢失。
-
-#### 7. Surge 外部脚本更新不能只靠直觉
-
-本机 `surge-cli --help` 显示了：
-
-```text
-external-resource update <key>
-external-resource update all
-```
-
-但没有显示“模块更新时强制刷新全部脚本资源”的模块指令。所以模块侧采用了两个策略：
-
-- `script-update-interval=3600`；
-- 每次发版 bump `#!version`，并给远程脚本 URL 加 `?v=...`。
-
-这样用户更新模块时，脚本 URL 本身也变化，Surge 会把它当作新的外部资源重新拉取。
-
-### 后续迭代记录
-
-README 初版提交是 `0b27892 docs(readme): document timedtext 429 workaround`。从这个提交之后，项目继续围绕模块化、命名、截图证据、双语模式、ASR 字幕布局做了多轮小步提交。下面按真实 commit 顺序记录这些后续变更，方便以后回溯为什么代码不是一个简单的“翻译后替换文本”。
-
-#### README 初版后的提交索引
-
-- `b5220b6 feat(module): add Surge timedtext module`：新增 Surge `.sgmodule`，把 request/response 脚本作为可安装模块提供，并把 README 安装方式改为模块 URL。
-- `7309b5d docs(readme): acknowledge dualsubs and nodeseek research`：补充 DualSubs、NodeSeek、TraderYao 等参考来源与致谢，说明本项目参考但不直接套用 DualSubs。
-- `3e835ea chore(module): rename to YT AutoTrans`：模块从较长的 timedtext translate 命名收敛为 `YT AutoTrans`，并同步 README。
-- `47ae954 docs(readme): reposition as YT AutoTrans`：把项目定位从单纯脚本调整为面向 YouTube 自动翻译错误的模块化方案。
-- `3887851 docs(readme): add bilingual project presentation`：README 改成中英文结构，开始面向中文和英文读者说明安装、原理和限制。
-- `d38863a docs(readme): clarify ios scope and error naming`：明确目标是 iPhone / iPad 原生 YouTube App，不把桌面浏览器场景作为主要对象。
-- `45301cd docs(readme): split languages and add module icon`：README 改为上方语言跳转、中文优先、英文在后；新增模块 icon。
-- `a1f0faf chore(module): add warning emoji to title`：尝试在模块标题加入警示 emoji，让 Surge 列表里更醒目。
-- `364c38c chore(module): use key emoji in title`：最终把模块标题 emoji 调整为 `🗝️`。
-- `b546003 docs(readme): add youtube subtitle error screenshot`：加入 YouTube App “加载字幕时出错”截图作为用户可见错误案例。
-- `ce1fbe6 docs(readme): add surge 429 evidence screenshot`：加入 Surge 抓包 `HTTP/1.1 429 Too Many Requests` 截图，说明 UI 错误对应 timedtext 429。
-- `44cdaf8 chore(scripts): align filenames with yt autotrans`：把脚本文件名从 `youtube_timedtext_*` 改为 `yt_autotrans_*`，和仓库/模块命名对齐。
-- `2f583dc feat(subtitles): add bilingual output option`：新增双语输出能力，支持原文 + 译文，而不是只输出单语翻译。
-- `1f6d710 feat(module): expose subtitle parameters`：把字幕显示方式暴露成 Surge 模块参数。
-- `dc7e393 feat(module): simplify subtitle mode setting`：把参数收敛为单个 `mode`，降低用户配置成本。
-- `1539734 fix(module): broaden timedtext request match`：曾尝试放宽 request 匹配范围，目的是减少漏拦截。
-- `4a4cb0d fix(module): set default subtitle mode`：修正默认参数，确保用户不手动填写也默认启用 `mode=dual`；同时避免过度放宽 request pattern 误伤普通 timedtext。
-- `738379b feat(subtitles): segment long timedtext cues`：对过长 ASR timedtext cue 做词级切分，减少长句双语显示拥挤。
-- `dce9a9e feat(subtitles): center asr timedtext layout`：新增 ASR 窗口居中与版本化脚本 URL。
-- `e074bf3 fix(subtitles): preserve bilingual line breaks`：双语换行改为 `&#x000A;`，删除 ASR 空白 spacer。
-- `1d58c07 fix(subtitles): isolate asr layout handling`：人工字幕和 ASR 字幕隔离；ASR 专属处理不再套到人工字幕。
-- `e4b5589 fix(subtitles): merge short asr captions`：尝试跨 `<p>` 合并短 ASR 字幕，后续因稳定性问题撤回。
-- `fc39f10 fix(subtitles): widen asr caption lines`：撤回跨段删除式合并，改为增大 `cc` 显示列宽和放宽切分阈值。
-- `05e137d fix(subtitles): add context to short asr cues`：对很短的 ASR cue 补入相邻上下文，不删除原始 `<p>`。
-- `d934132 docs(readme): document subtitle iteration history`：补充后续迭代和踩坑记录。
-- 当前版本还在参数表中加入 `github=d934132`，方便在 Surge 里和 GitHub commit 对照。
-
-#### `2026.05.01.2`：模块资源更新与 ASR 居中
-
-- 给模块增加 `#!version`，并把远程脚本 URL 改成带 `?v=...` 的版本化地址。
-- 保留 `script-update-interval=3600`，同时用版本化 URL 解决 Surge 外部脚本资源不立即刷新的问题。
-- 给 ASR timedtext 增加 `normalizeTimedtextLayout()`：
-  - `ws id="1"` 设置为居中对齐；
-  - `wp id="1"` 设置为底部居中窗口；
-  - 保持 `w id="1"` 指向 `wp="1"` 和 `ws="1"`。
-- 这一步解决的是自动生成字幕常见的左侧/roll-up 窗口问题，但还不能单独解决三行字幕。
-
-#### `2026.05.01.3`：双语换行和空白 spacer
-
-- 把双语换行从真实换行字符改为 XML 数字实体 `&#x000A;`。
-- 删除 ASR 里的空白 roll-up spacer，例如 `<p ... a="1"></p>`。
-- 缓存版本同步升级，避免旧缓存继续输出旧格式。
-- 这一步解决了 YouTube timedtext renderer 可能折叠普通换行、以及空白 spacer 额外占行的问题。
-
-#### `2026.05.01.4`：人工字幕 / ASR 字幕隔离
-
-- 增加 ASR 检测：`kind=asr`、`<w ... wp=...>`、`w="1"` + `<s t="...">` 等结构会被视为自动识别字幕。
-- ASR 专属逻辑只在自动识别字幕上运行：
-  - 居中窗口；
-  - 删除 spacer；
-  - 按词级时间戳切分；
-  - 裁剪重叠时长。
-- 人工字幕走保守路径，只替换文本，不套 ASR 的布局修复。
-- 这一步是为了避免自动识别字幕的修复误伤已有字幕。
-
-#### `2026.05.01.5`：跨 `<p>` 合并短句，后续撤回
-
-- 曾尝试把相邻很短的 ASR `<p>` 合并成更长的字幕短语。
-- 这个方向可以减少“一两个词一跳”，但需要把多个原始 paragraph 映射到一个输出 paragraph，并删除后续 paragraph。
-- 实测发现它会让翻译缓存、marker 顺序和 paragraph 替换变脆弱，出现过只剩 `[Music]` 等短提示字幕稳定显示的情况。
-- 因此这个版本的思路被撤回，不再作为当前设计。
-
-#### `2026.05.01.6`：增加每行显示长度，恢复稳定
-
-- 撤掉跨 `<p>` 删除式合并。
-- 把 ASR 字幕窗口列宽从 `cc=40` 放宽到 `cc=80`。
-- 把内部切分阈值从较短的 `60 / 10词` 放宽到 `92 / 16词`。
-- 保留重叠时长裁剪，避免 roll-up 时间轴造成多行叠加。
-- 这一步的目标是先恢复稳定显示，再减少字幕过短。
-
-#### `2026.05.01.7`：短 cue 上下文补全
-
-- 对一两个词、显示时间很短、或显示宽度很短的 ASR cue，补入前后相邻文本作为上下文。
-- 不删除任何原始 `<p>`，不改变 paragraph 映射，只改变当前 cue 的文本内容。
-- 跳过 `[Music]` 这类方括号提示，避免把提示音效和语句混在一起。
-- 这是当前版本用来缓解“字幕太机械、单词快速闪过”的方式，比真正跨段合并更稳定。
+- 先解决 429：request 脚本只拦截带 `tlang` 的原始 timedtext 请求，保存 `lang/tlang`，然后本地返回 302 到不带 `tlang` 的 clean URL，避免把高风险请求发给 YouTube。
+- 不使用纯 URL Rewrite：Rewrite 删除 `tlang` 后，response 阶段已经不知道用户选择的目标语言，无法面向全球用户自动跟随 YouTube 客户端的语言选择。
+- 人工字幕和自动识别字幕隔离：人工字幕走保守替换；ASR 自动字幕才启用窗口居中、删 spacer、切分、重叠时长裁剪和短 cue 上下文补全。
+- 双语换行使用 `&#x000A;`，不直接写真实换行，减少 YouTube timedtext renderer 折叠换行后出现三行字幕的概率。
+- ASR 字幕通过 `cc=80`、较宽松的切分阈值、短 cue 上下文补全来改善可读性；不做跨 `<p>` 删除式合并，避免 paragraph 映射不稳导致字幕丢失。
+- 模块通过 GitHub Release 发布 `.sgmodule`，参数里的 `version=v...` 对应 release/tag；脚本 URL 同时带 `?v=...`，配合 `script-update-interval=3600` 让 Surge 更容易拉到新版外部脚本。
 
 ### 缓存策略
 
@@ -507,13 +370,13 @@ Desktop browsers are not the main target. On desktop, tools such as Immersive Tr
 Surge module URL:
 
 ```text
-https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans.sgmodule
+https://github.com/CyberDoctor2023/yt-autotrans/releases/latest/download/yt-autotrans.sgmodule
 ```
 
 Important:
 
 - The Surge module/script list may not show the script name prominently, so the module includes `#!icon`. The icon uses a red prohibition mark and `429` to make the purpose recognizable at a glance.
-- The module arguments include `github`, whose default value is a GitHub commit short SHA. It is only a visible version marker in Surge; scripts do not read it.
+- The module arguments include `version`, whose default value matches the GitHub release/tag. It is only a visible version marker in Surge; scripts do not read it.
 - Remote scripts use `script-update-interval=3600` and versioned URLs such as `?v=2026.05.01.7`. The local Surge CLI help exposes `external-resource update <key>` and `external-resource update all`, but no module directive that forcibly refreshes all external scripts when a module is updated. Versioned script URLs make each release a new resource URL, so Surge fetches the current scripts after module updates.
 - Remove old `/api/timedtext` URL Rewrite rules that delete `tlang`.
 - Keep MITM enabled for `www.youtube.com`.
@@ -634,131 +497,14 @@ Bilingual line breaks are written as the XML numeric entity `&#x000A;` instead o
 
 The module exposes one Surge editable parameter through `#!arguments`: `mode`. Use `mode=dual` for source above translation, `mode=reverse` for translation above source, and `mode=single` for translation only.
 
-### Debugging Notes
+### Design Notes
 
-This project went through several iterations after the initial README. The current design is mostly the result of real iOS captures and failed alternatives.
-
-#### 1. The XML replacement path was not the root problem
-
-Direct response-body replacement was verified early: replacing timedtext `<p>` text with Chinese test strings worked in the YouTube iOS app. The failure was not "Surge cannot rewrite XML"; the real blocker was that upstream `/api/timedtext?...&tlang=...` requests could return `429` in affected network environments.
-
-#### 2. Pure URL Rewrite avoids 429 but loses the target language
-
-Deleting `tlang` with `[URL Rewrite]` can avoid the upstream 429, but after the local 302 the response script only sees the clean URL. It no longer knows whether the user asked for Chinese, Japanese, Spanish, or another target language. That is why the module uses a request script to save `lang/tlang` before returning a local 302.
-
-#### 3. Manual captions and ASR captions must be separated
-
-Manual captions usually arrive as normal cue paragraphs. YouTube ASR captions often arrive as word-timed roll-up XML with `<w>`, `w="1"`, and nested `<s t="...">` nodes. ASR-only layout fixes are now gated behind `kind=asr` or ASR-like XML detection, while manual captions use a conservative replacement path.
-
-#### 4. The "three-line subtitle" issue had multiple causes
-
-The three-line display was not caused by only one thing:
-
-- ASR windows can be left-aligned or roll-up styled, so `ws/wp` metadata is normalized toward a bottom-centered caption window.
-- Raw newline characters may be folded by YouTube's timedtext renderer, so bilingual line breaks are emitted as `&#x000A;`.
-- ASR roll-up cues can overlap in time, so ASR output durations are clamped before the next cue starts.
-
-#### 5. Empty `a="1"` roll-up spacer paragraphs matter
-
-ASR captions often contain empty spacer paragraphs such as:
-
-```xml
-<p t="3030" d="3130" w="1" a="1">
-</p>
-```
-
-These can make sense for original roll-up captions, but they can add unwanted layout rows after bilingual rewriting. The ASR path removes them; the manual-caption path does not.
-
-#### 6. Real cross-`<p>` merging was tried and removed
-
-Merging adjacent short `<p>` cues into one output paragraph sounded attractive, but it made paragraph mapping and translation caching fragile. In testing, that approach could make most captions disappear while short hints like `[Music]` still showed. The current approach is safer: widen the ASR caption window, relax internal splitting, and enrich very short cues with nearby context without deleting source paragraphs.
-
-#### 7. External resource updates are handled by versioned script URLs
-
-The local Surge CLI help exposes `external-resource update <key>` and `external-resource update all`, but no module directive that forces all external scripts to refresh whenever a module is updated. For releases, the module therefore bumps both `#!version` and the script URL query, such as `?v=2026.05.01.7`.
-
-### Iteration Log
-
-The first README commit was `0b27892 docs(readme): document timedtext 429 workaround`. After that, the project continued through module packaging, naming, screenshots, bilingual display, module parameters, and ASR subtitle layout fixes. This section records the actual commits after the initial README.
-
-#### Commit Index After The Initial README
-
-- `b5220b6 feat(module): add Surge timedtext module`: added the `.sgmodule` installer and documented module-based installation.
-- `7309b5d docs(readme): acknowledge dualsubs and nodeseek research`: credited DualSubs, NodeSeek, and TraderYao, while clarifying that this project only borrows ideas.
-- `3e835ea chore(module): rename to YT AutoTrans`: renamed the module toward the shorter `YT AutoTrans` identity.
-- `47ae954 docs(readme): reposition as YT AutoTrans`: repositioned the project as a YouTube auto-translation error module, not just a pair of scripts.
-- `3887851 docs(readme): add bilingual project presentation`: reorganized README into Chinese and English sections.
-- `d38863a docs(readme): clarify ios scope and error naming`: clarified that the main target is the native iPhone / iPad YouTube app.
-- `45301cd docs(readme): split languages and add module icon`: added language navigation and the module icon.
-- `a1f0faf chore(module): add warning emoji to title`: tried a warning emoji in the module title.
-- `364c38c chore(module): use key emoji in title`: changed the title emoji to `🗝️`.
-- `b546003 docs(readme): add youtube subtitle error screenshot`: added the YouTube app error screenshot.
-- `ce1fbe6 docs(readme): add surge 429 evidence screenshot`: added the Surge `429 Too Many Requests` capture screenshot.
-- `44cdaf8 chore(scripts): align filenames with yt autotrans`: renamed scripts from `youtube_timedtext_*` to `yt_autotrans_*`.
-- `2f583dc feat(subtitles): add bilingual output option`: added bilingual output support.
-- `1f6d710 feat(module): expose subtitle parameters`: exposed subtitle display choices through module parameters.
-- `dc7e393 feat(module): simplify subtitle mode setting`: simplified configuration to one `mode` parameter.
-- `1539734 fix(module): broaden timedtext request match`: briefly broadened the timedtext request match to reduce missed interception.
-- `4a4cb0d fix(module): set default subtitle mode`: restored a safer request match and made `mode=dual` the default.
-- `738379b feat(subtitles): segment long timedtext cues`: split long word-timed ASR cues.
-- `dce9a9e feat(subtitles): center asr timedtext layout`: added ASR layout normalization and versioned script URLs.
-- `e074bf3 fix(subtitles): preserve bilingual line breaks`: switched bilingual line breaks to `&#x000A;` and removed ASR spacers.
-- `1d58c07 fix(subtitles): isolate asr layout handling`: separated manual-caption handling from ASR-specific handling.
-- `e4b5589 fix(subtitles): merge short asr captions`: tried cross-`<p>` short cue merging; later reverted due to instability.
-- `fc39f10 fix(subtitles): widen asr caption lines`: removed cross-`<p>` deletion-style merging and widened ASR caption lines.
-- `05e137d fix(subtitles): add context to short asr cues`: enriched short ASR cues with nearby context without deleting source paragraphs.
-- `d934132 docs(readme): document subtitle iteration history`: added the iteration history itself.
-- The current module also exposes `github=d934132` in the parameter table so users can compare the Surge-installed module with the GitHub commit.
-
-#### `2026.05.01.2`: resource versioning and ASR centering
-
-- Added `#!version` to the module and versioned remote script URLs with `?v=...`.
-- Kept `script-update-interval=3600`, while using the URL version query to force a fresh external script resource after module updates.
-- Added `normalizeTimedtextLayout()` for ASR timedtext:
-  - center-align `ws id="1"`;
-  - move `wp id="1"` toward a bottom-centered caption window;
-  - keep `w id="1"` bound to `wp="1"` and `ws="1"`.
-- This addressed left-aligned or roll-up ASR windows, but did not fully solve the three-line display by itself.
-
-#### `2026.05.01.3`: bilingual line breaks and spacer removal
-
-- Changed bilingual line breaks from raw newline characters to the XML numeric entity `&#x000A;`.
-- Removed empty ASR roll-up spacer paragraphs such as `<p ... a="1"></p>`.
-- Bumped the cache version so stale translated output would not keep the old layout.
-- This fixed raw-newline folding and spacer rows that could create extra visual lines.
-
-#### `2026.05.01.4`: manual caption / ASR isolation
-
-- Added ASR detection through `kind=asr`, `<w ... wp=...>`, and `w="1"` plus nested `<s t="...">`.
-- Limited ASR-only behavior to auto-generated captions:
-  - layout normalization;
-  - spacer removal;
-  - word-timed splitting;
-  - overlapping-duration clamping.
-- Manual captions use the conservative replacement path.
-- This prevented ASR-specific fixes from affecting existing human-authored captions.
-
-#### `2026.05.01.5`: cross-`<p>` short cue merging, later removed
-
-- Tried merging adjacent short ASR `<p>` cues into longer phrases.
-- This reduced one-word flashes, but required mapping multiple source paragraphs to one output paragraph and deleting later paragraphs.
-- In real testing, the mapping and cache became fragile; most captions could disappear while short hints like `[Music]` still appeared.
-- This strategy was removed and is not part of the current design.
-
-#### `2026.05.01.6`: wider caption lines for stability
-
-- Removed cross-`<p>` deletion-style merging.
-- Widened the ASR caption window from `cc=40` to `cc=80`.
-- Relaxed internal splitting from roughly `60 / 10 words` to `92 / 16 words`.
-- Kept overlapping-duration clamping for roll-up timelines.
-- The goal was to restore stable display first, then reduce overly short cues.
-
-#### `2026.05.01.7`: context enrichment for short cues
-
-- Very short ASR cues now borrow nearby context from adjacent cues.
-- No source paragraph is deleted, and paragraph mapping remains stable.
-- Bracket cues such as `[Music]` are skipped so sound-effect labels do not get mixed into spoken lines.
-- This is the current approach for reducing mechanical one-word flashes without reintroducing the cross-paragraph merge failure.
+- 429 avoidance comes first: the request script intercepts only timedtext URLs with `tlang`, stores the source and target language, then returns a local 302 to a clean URL without sending the high-risk request upstream.
+- Pure URL Rewrite is not enough for a global audience: after `tlang` is removed, the response phase no longer knows which target language the YouTube client selected.
+- Manual captions and ASR captions are separated. Manual captions use conservative text replacement; ASR captions receive ASR-only layout centering, spacer removal, splitting, overlap clamping, and short-cue context enrichment.
+- Bilingual line breaks are emitted as `&#x000A;`, not raw newline characters, to reduce accidental line folding by YouTube's timedtext renderer.
+- ASR readability is improved with `cc=80`, relaxed splitting thresholds, and nearby context for very short cues. Real cross-`<p>` deletion-style merging is intentionally avoided because it can make paragraph mapping unstable and cause captions to disappear.
+- The module is published as a GitHub Release `.sgmodule`. The visible `version=v...` parameter maps to the release/tag, while script URLs also carry `?v=...` and `script-update-interval=3600` to make external script refreshes more reliable in Surge.
 
 ### Cache Strategy
 

@@ -33,6 +33,8 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - ASR overlapping paragraph durations are clamped before the next caption starts.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
+- The install URL points to the GitHub Release `.sgmodule` asset, and the visible module `version` argument matches the release/tag rather than a self-referential commit hash.
+- README documents current features and design tradeoffs without a long commit-by-commit history.
 - Scripts pass `node --check`.
 
 ## Validation Plan
@@ -41,6 +43,7 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Verify Surge module parameter syntax and external-resource commands against local CLI/help.
 - Run syntax checks for request and response scripts.
 - Search README/module for stale filenames and stale option names.
+- Publish the matching `.sgmodule` as a GitHub Release asset for the visible version tag.
 
 ## Follow-up Todos
 
