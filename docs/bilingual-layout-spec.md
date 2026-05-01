@@ -34,7 +34,3 @@ Add optional bilingual timedtext output for YT AutoTrans Error. The first implem
 
 - Todo 2: center subtitle layout.
 - Todo 3: sentence grouping for ASR captions.
-
-## Stabilization Notes
-
-- The request script should match all `/api/timedtext` requests and decide inside the script whether `tlang` exists. This is more robust than relying on the script pattern to contain `tlang`, because YouTube may reorder or encode query parameters in ways that still parse correctly in JavaScript but fail a narrow Surge pattern.
