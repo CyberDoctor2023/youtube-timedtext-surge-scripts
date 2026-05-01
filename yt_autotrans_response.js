@@ -11,13 +11,13 @@ const SHORT_CONTEXT_WORDS = 16;
 const SHORT_TOKEN_LIMIT = 2;
 const SHORT_DISPLAY_WIDTH = 14;
 const SHORT_DURATION_MS = 1200;
-const CACHE_VERSION = 11;
+const CACHE_VERSION = 12;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
   position: "Forward"
 };
-const TRANSLATE_TIMEOUT_TEXT = "[YT AutoTrans] Google 翻译服务超时，请稍后重试。";
+const TRANSLATE_TIMEOUT_TEXT = "[YT AutoTrans] Google 翻译服务超时，请检查节点或稍后重试。";
 
 let body = $response.body || "";
 let headers = Object.assign({}, $response.headers || {});
@@ -648,15 +648,18 @@ function buildChunks(items) {
   return chunks;
 }
 
-function markTranslateTimeout(items) {
+function markTranslateTimeoutTrack(items) {
+  let count = 0;
+
   for (let index = 0; index < items.length; index += 1) {
-    if (items[index].text && !items[index].translated) {
+    if (items[index].text) {
       items[index].translated = TRANSLATE_TIMEOUT_TEXT;
-      return true;
+      items[index].diagnostic = true;
+      count += 1;
     }
   }
 
-  return false;
+  return count;
 }
 
 function finish(items, translatedCount, cache, key, options, useAsrLayout, status) {
@@ -670,7 +673,9 @@ function finish(items, translatedCount, cache, key, options, useAsrLayout, statu
       continue;
     }
 
-    const text = makeSubtitleText(item.text, item.translated, options);
+    const text = item.diagnostic
+      ? item.translated
+      : makeSubtitleText(item.text, item.translated, options);
     const xml = "<p" + item.attrs + "><s ac=\"0\">" + encodeSubtitleText(text) + "</s></p>";
 
     if (!replacements[item.paragraphIndex]) {
@@ -777,7 +782,7 @@ if (!meta) {
       finished = true;
 
       if (translatedCount === 0 && status) {
-        markTranslateTimeout(items);
+        markTranslateTimeoutTrack(items);
       }
 
       finish(items, translatedCount, cache, key, options, useAsrLayout, status);
