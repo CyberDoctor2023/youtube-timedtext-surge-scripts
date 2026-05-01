@@ -1,28 +1,50 @@
 let body = $response.body || "";
 const url = $request.url;
 
-function getParam(u, name) {
-  const m = u.match(new RegExp("[?&]" + name + "=([^&]+)"));
-  return m ? decodeURIComponent(m[1]) : "";
+function removeParam(u, name) {
+  const qIndex = u.indexOf("?");
+  if (qIndex === -1) return u;
+
+  const base = u.slice(0, qIndex);
+  const query = u.slice(qIndex + 1);
+
+  const kept = query
+    .split("&")
+    .filter(function (part) {
+      if (!part) return false;
+      return part.split("=")[0] !== name;
+    });
+
+  return kept.length ? base + "?" + kept.join("&") : base;
 }
 
-function readPendingState(videoId) {
-  if (!videoId) return null;
+function simpleHash(str) {
+  let h = 2166136261;
 
-  const key = "yt_translate_pending_" + videoId;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+  }
+
+  return (h >>> 0).toString(16);
+}
+
+function readStateForUrl(u) {
+  let cleanUrl = removeParam(u, "tlang");
+  cleanUrl = removeParam(cleanUrl, "_yt_x");
+  cleanUrl = removeParam(cleanUrl, "_yt_trg");
+
+  const key = "yt_tt_" + simpleHash(cleanUrl);
   const raw = $persistentStore.read(key);
 
   if (!raw) return null;
 
   try {
     const state = JSON.parse(raw);
-    const ttl = state.ttl || 30000;
+    const ttl = state.ttl || 60000;
 
     if (!state.target) return null;
     if (Date.now() - state.time > ttl) return null;
-
-    // 关键：读到后立刻清空，避免后续所有字幕都变测试中文
-    $persistentStore.write("", key);
 
     return state;
   } catch (e) {
@@ -30,16 +52,15 @@ function readPendingState(videoId) {
   }
 }
 
-const videoId = getParam(url, "v");
-const state = readPendingState(videoId);
+const state = readStateForUrl(url);
 
-// 没有 pending：普通字幕完全不改
+// 没有 cleanUrl 对应状态：普通字幕不改
 if (!state) {
   $done({});
   return;
 }
 
-// 有 pending：只替换这一次
+// 命中由 tlang 改写来的那条请求：才替换测试中文
 const regex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
 
 let count = 0;
