@@ -1,5 +1,6 @@
 const TARGET_LANG = "zh-CN";
 const SOURCE_LANG = "auto";
+const TRANSLATE_SOURCE_LANGS = ["en"];
 const REQUEST_TIMEOUT = 5;
 const MAX_URL_LENGTH = 5000;
 const MAX_CHUNKS = 8;
@@ -10,6 +11,25 @@ let headers = Object.assign({}, $response.headers || {});
 const pRegex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
 const sRegex = /<s\b[^>]*>([\s\S]*?)<\/s>/g;
 const markerRegex = /@@YT(\d+)@@([\s\S]*?)(?=@@YT\d+@@|$)/g;
+
+function getRequestSourceLang() {
+  try {
+    const url = new URL($request.url);
+    return String(url.searchParams.get("lang") || "").toLowerCase();
+  } catch (e) {
+    return "";
+  }
+}
+
+function shouldTranslateSourceLang(lang) {
+  if (!lang) {
+    return false;
+  }
+
+  return TRANSLATE_SOURCE_LANGS.some(function (allowedLang) {
+    return lang === allowedLang || lang.indexOf(allowedLang + "-") === 0;
+  });
+}
 
 function decodeXml(text) {
   return String(text || "")
@@ -203,38 +223,45 @@ function buildChunks(items) {
 
 const items = [];
 let match;
+const sourceLang = getRequestSourceLang();
 
-while ((match = pRegex.exec(body)) !== null) {
-  items.push({
-    text: extractText(match[2]),
-    translated: ""
-  });
-}
-
-if (items.length === 0) {
-  finish(items, 0);
+if (!shouldTranslateSourceLang(sourceLang)) {
+  console.log("YouTube timedtext skipped source lang: " + (sourceLang || "unknown"));
+  $done({});
 } else {
-  const chunks = buildChunks(items);
-  let chunkIndex = 0;
-  let translatedCount = 0;
 
-  function nextChunk() {
-    if (chunkIndex >= chunks.length) {
-      finish(items, translatedCount);
-      return;
-    }
-
-    const chunk = chunks[chunkIndex];
-    chunkIndex += 1;
-
-    translateText(makeMarkedText(chunk), function (translatedText) {
-      if (translatedText) {
-        translatedCount += applyMarkedTranslations(translatedText, items);
-      }
-
-      nextChunk();
+  while ((match = pRegex.exec(body)) !== null) {
+    items.push({
+      text: extractText(match[2]),
+      translated: ""
     });
   }
 
-  nextChunk();
+  if (items.length === 0) {
+    finish(items, 0);
+  } else {
+    const chunks = buildChunks(items);
+    let chunkIndex = 0;
+    let translatedCount = 0;
+
+    function nextChunk() {
+      if (chunkIndex >= chunks.length) {
+        finish(items, translatedCount);
+        return;
+      }
+
+      const chunk = chunks[chunkIndex];
+      chunkIndex += 1;
+
+      translateText(makeMarkedText(chunk), function (translatedText) {
+        if (translatedText) {
+          translatedCount += applyMarkedTranslations(translatedText, items);
+        }
+
+        nextChunk();
+      });
+    }
+
+    nextChunk();
+  }
 }
