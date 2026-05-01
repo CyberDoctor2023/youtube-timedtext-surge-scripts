@@ -1,83 +1,28 @@
 const TARGET_LANG = "zh-CN";
+const SOURCE_LANG = "auto";
+const BATCH_SIZE = 8;
+const SPLIT_MARK = "<<<YT_TIMEDTEXT_SPLIT_9A7F>>>";
+
 let body = $response.body || "";
+let headers = Object.assign({}, $response.headers || {});
 
-// ================= 只处理由 tlang 改写出来的当次请求 =================
+const pRegex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
+const sRegex = /<s\b[^>]*>([\s\S]*?)<\/s>/g;
 
-const requestUrl = $request.url;
-
-function normalizeUrlForKey(u) {
-  const parsed = new URL(u);
-  const params = [];
-
-  parsed.searchParams.forEach(function (value, key) {
-    if (
-      key !== "tlang" &&
-      key !== "_yt_x" &&
-      key !== "_yt_trg" &&
-      key !== "subtype" &&
-      key !== "dst"
-    ) {
-      params.push(key + "=" + value);
-    }
-  });
-
-  params.sort();
-
-  return parsed.origin + parsed.pathname + "?" + params.join("&");
-}
-
-function simpleHash(str) {
-  let h = 2166136261;
-
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
-  }
-
-  return (h >>> 0).toString(16);
-}
-
-function readHitState(u) {
-  const key = "yt_tt_hit_" + simpleHash(normalizeUrlForKey(u));
-  const raw = $persistentStore.read(key);
-
-  if (!raw) return null;
-
-  try {
-    const state = JSON.parse(raw);
-    const ttl = state.ttl || 60000;
-
-    if (!state.time || Date.now() - state.time > ttl) return null;
-
-    return state;
-  } catch (e) {
-    return null;
-  }
-}
-
-const hitState = readHitState(requestUrl);
-
-// 没有命中：普通英文字幕，完全不改
-if (!hitState) {
-  $done({});
-  return;
-}
-
-// ================= 以下是已验证能返回中文的翻译逻辑 =================
-
-function decodeXml(str) {
-  return str
-    .replace(/&amp;/g, "&")
+function decodeXml(text) {
+  return String(text || "")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
     .replace(/&#39;/g, "'")
     .replace(/&#x27;/g, "'")
-    .replace(/&nbsp;/g, " ");
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&");
 }
 
-function encodeXml(str) {
-  return str
+function encodeXml(text) {
+  return String(text || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -85,86 +30,196 @@ function encodeXml(str) {
     .replace(/'/g, "&#39;");
 }
 
-function translateOne(text, callback) {
+function extractText(content) {
+  let text = "";
+  let match;
+
+  sRegex.lastIndex = 0;
+
+  while ((match = sRegex.exec(content)) !== null) {
+    text += decodeXml(match[1]);
+  }
+
+  if (text.trim()) {
+    return text.trim();
+  }
+
+  return decodeXml(String(content || "").replace(/<[^>]+>/g, "")).trim();
+}
+
+function normalizeHeaders() {
+  delete headers["Content-Encoding"];
+  delete headers["content-encoding"];
+  delete headers["Content-Type"];
+  delete headers["content-type"];
+  delete headers["Content-Length"];
+  delete headers["content-length"];
+  delete headers["Transfer-Encoding"];
+  delete headers["transfer-encoding"];
+
+  headers["Content-Encoding"] = "identity";
+  headers["Content-Type"] = "text/xml; charset=UTF-8";
+}
+
+function parseGoogleTranslate(data) {
+  const json = JSON.parse(data);
+  let result = "";
+
+  if (!json || !json[0]) {
+    return "";
+  }
+
+  for (let index = 0; index < json[0].length; index += 1) {
+    if (json[0][index] && json[0][index][0]) {
+      result += json[0][index][0];
+    }
+  }
+
+  return result;
+}
+
+function translate(text, callback) {
   const url =
-    "https://translate.googleapis.com/translate_a/single" +
-    "?client=gtx" +
-    "&sl=auto" +
-    "&tl=" + TARGET_LANG +
-    "&dt=t" +
-    "&q=" + encodeURIComponent(text);
+    "https://translate.googleapis.com/translate_a/single?client=gtx" +
+    "&sl=" + encodeURIComponent(SOURCE_LANG) +
+    "&tl=" + encodeURIComponent(TARGET_LANG) +
+    "&dt=t&q=" + encodeURIComponent(text);
 
-  $httpClient.get(url, function (error, response, data) {
-    if (error || !data) {
-      console.log("翻译失败，保留原文: " + text);
-      callback(text);
-      return;
+  $httpClient.get(
+    {
+      url: url,
+      headers: {
+        "User-Agent": "Surge timedtext translator"
+      },
+      timeout: 8
+    },
+    function (error, response, data) {
+      if (error || !response || response.status >= 400 || !data) {
+        callback("");
+        return;
+      }
+
+      try {
+        callback(parseGoogleTranslate(data));
+      } catch (e) {
+        callback("");
+      }
+    }
+  );
+}
+
+function finish(items, translatedCount) {
+  let index = 0;
+
+  body = body.replace(pRegex, function (match, attrs, content) {
+    const item = items[index];
+    index += 1;
+
+    if (!item || !item.translated) {
+      return match;
     }
 
-    try {
-      const json = JSON.parse(data);
-      const translated = json[0].map(x => x[0]).join("");
-      callback(translated || text);
-    } catch (e) {
-      console.log("翻译解析失败，保留原文: " + e);
-      callback(text);
-    }
+    return "<p" + attrs + "><s ac=\"0\">" + encodeXml(item.translated) + "</s></p>";
+  });
+
+  normalizeHeaders();
+
+  console.log("YouTube timedtext translated: " + translatedCount + "/" + items.length);
+
+  $done({
+    body: body,
+    headers: headers
   });
 }
 
-const regex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
-const matches = [...body.matchAll(regex)];
+const items = [];
+let match;
 
-if (!matches.length) {
-  console.log("没找到 <p> 字幕节点");
-  $done({ body });
+while ((match = pRegex.exec(body)) !== null) {
+  items.push({
+    attrs: match[1],
+    text: extractText(match[2]),
+    translated: ""
+  });
+}
+
+if (items.length === 0) {
+  normalizeHeaders();
+  $done({
+    body: body,
+    headers: headers
+  });
 } else {
-  console.log("找到字幕条数: " + matches.length);
+  let cursor = 0;
+  let translatedCount = 0;
 
-  let originals = matches.map(m =>
-    decodeXml(m[2]).replace(/\s+/g, " ").trim()
-  );
+  function translateOneByOne(batch, done) {
+    let index = 0;
 
-  let translated = new Array(originals.length);
-  let finished = 0;
+    function nextOne() {
+      if (index >= batch.length) {
+        done();
+        return;
+      }
 
-  originals.forEach((text, index) => {
-    if (!text) {
-      translated[index] = "";
-      finished++;
+      const item = batch[index];
+      index += 1;
+
+      translate(item.text, function (translated) {
+        if (translated) {
+          item.translated = translated;
+          translatedCount += 1;
+        }
+
+        nextOne();
+      });
+    }
+
+    nextOne();
+  }
+
+  function translateNextBatch() {
+    if (cursor >= items.length) {
+      finish(items, translatedCount);
       return;
     }
 
-    translateOne(text, function (zh) {
-      translated[index] = zh;
-      finished++;
+    const batch = [];
 
-      if (finished === originals.length) {
-        let i = 0;
-
-        body = body.replace(regex, function (match, attrs, content) {
-          const original = decodeXml(content).replace(/\s+/g, " ").trim();
-
-          if (!original) return match;
-
-          const zh = translated[i] || original;
-          i++;
-
-          return `<p${attrs}>${encodeXml(zh)}</p>`;
-        });
-
-        console.log("字幕翻译完成，替换数量: " + i);
-
-        $done({
-          body,
-          headers: {
-            ...$response.headers,
-            "Content-Encoding": "identity",
-            "Content-Type": "text/xml; charset=UTF-8",
-            "X-YT-Debug": "FINAL_TRANSLATED;count=" + i
-          }
-        });
+    while (cursor < items.length && batch.length < BATCH_SIZE) {
+      if (items[cursor].text) {
+        batch.push(items[cursor]);
       }
+      cursor += 1;
+    }
+
+    if (batch.length === 0) {
+      translateNextBatch();
+      return;
+    }
+
+    const joined = batch.map(function (item) {
+      return item.text;
+    }).join(SPLIT_MARK);
+
+    translate(joined, function (translatedJoined) {
+      const parts = translatedJoined ? translatedJoined.split(SPLIT_MARK) : [];
+
+      if (parts.length === batch.length) {
+        for (let index = 0; index < batch.length; index += 1) {
+          if (parts[index] && parts[index].trim()) {
+            batch[index].translated = parts[index].trim();
+            translatedCount += 1;
+          }
+        }
+
+        translateNextBatch();
+        return;
+      }
+
+      translateOneByOne(batch, translateNextBatch);
     });
-  });
+  }
+
+  translateNextBatch();
 }
