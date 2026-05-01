@@ -15,6 +15,22 @@ function metaKey(cleanUrl) {
   return "yt_tt_meta_" + hashString(cleanUrl);
 }
 
+function trackMetaKey(urlString) {
+  try {
+    const url = new URL(urlString);
+    const keys = ["v", "lang", "kind", "variant", "format"];
+    const parts = [url.origin, url.pathname];
+
+    for (let index = 0; index < keys.length; index += 1) {
+      parts.push(keys[index] + "=" + (url.searchParams.get(keys[index]) || ""));
+    }
+
+    return "yt_tt_track_" + hashString(parts.join("|"));
+  } catch (error) {
+    return "yt_tt_track_" + hashString(urlString);
+  }
+}
+
 function canonicalTimedtextUrl(urlString) {
   try {
     const url = new URL(urlString);
@@ -65,6 +81,7 @@ try {
 
       $persistentStore.write(JSON.stringify(meta), metaKey(cleanUrl));
       $persistentStore.write(JSON.stringify(meta), metaKey(canonicalTimedtextUrl(cleanUrl)));
+      $persistentStore.write(JSON.stringify(meta), trackMetaKey(cleanUrl));
 
       console.log(
         "YouTube timedtext redirect cached: " +
