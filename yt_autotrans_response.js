@@ -1,7 +1,8 @@
-const REQUEST_TIMEOUT = 2;
-const RESPONSE_DEADLINE_MS = 5000;
+const REQUEST_TIMEOUT = 3;
+const RESPONSE_DEADLINE_MS = 6500;
 const MAX_URL_LENGTH = 5000;
-const MAX_CHUNKS_PER_RESPONSE = 8;
+const MAX_CHUNKS_PER_RESPONSE = 12;
+const MAX_PARALLEL_REQUESTS = 2;
 const MAX_SEGMENT_WIDTH = 92;
 const MAX_SEGMENT_WORDS = 16;
 const MIN_SENTENCE_WIDTH = 24;
@@ -10,7 +11,7 @@ const SHORT_CONTEXT_WORDS = 16;
 const SHORT_TOKEN_LIMIT = 2;
 const SHORT_DISPLAY_WIDTH = 14;
 const SHORT_DURATION_MS = 1200;
-const CACHE_VERSION = 9;
+const CACHE_VERSION = 11;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -764,6 +765,8 @@ if (!meta) {
     let translatedCount = 0;
     let failedCount = 0;
     const startedAt = Date.now();
+    let nextChunkIndex = 0;
+    let activeCount = 0;
     let finished = false;
 
     function complete(status) {
@@ -795,6 +798,31 @@ if (!meta) {
 
       if (completedCount >= chunks.length) {
         complete(translatedCount === 0 && failedCount > 0 ? "translate failed" : "");
+      } else {
+        startNextChunks();
+      }
+    }
+
+    function startNextChunks() {
+      while (
+        !finished &&
+        activeCount < MAX_PARALLEL_REQUESTS &&
+        nextChunkIndex < chunks.length &&
+        Date.now() - startedAt < RESPONSE_DEADLINE_MS
+      ) {
+        const chunk = chunks[nextChunkIndex];
+        nextChunkIndex += 1;
+        activeCount += 1;
+
+        translateText(
+          makeMarkedText(chunk),
+          meta.sourceLang || "auto",
+          meta.targetLang,
+          function (translatedText) {
+            activeCount -= 1;
+            completeOne(translatedText);
+          }
+        );
       }
     }
 
@@ -805,14 +833,7 @@ if (!meta) {
         complete("translate timeout");
       }, RESPONSE_DEADLINE_MS);
 
-      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
-        translateText(
-          makeMarkedText(chunks[chunkIndex]),
-          meta.sourceLang || "auto",
-          meta.targetLang,
-          completeOne
-        );
-      }
+      startNextChunks();
     }
   }
 }

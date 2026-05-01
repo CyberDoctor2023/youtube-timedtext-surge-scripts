@@ -52,3 +52,4 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 
 - Tune timedtext centering further if real iOS captures show a different `wp/ws` enum is needed.
 - Tune ASR grouping with more real auto-generated captions.
+- Test beta branch releases before merging risky timing/cache strategy changes into `main`.
