@@ -13,7 +13,7 @@ const SHORT_CONTEXT_WORDS = 16;
 const SHORT_TOKEN_LIMIT = 2;
 const SHORT_DISPLAY_WIDTH = 14;
 const SHORT_DURATION_MS = 1200;
-const CACHE_VERSION = 19;
+const CACHE_VERSION = 20;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,

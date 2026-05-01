@@ -38,6 +38,7 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Beta8 lowers Google Translate concurrency to reduce full-batch failures and expands diagnostics to include items, cached, requested, ok, fail, missing, and status.
 - Beta9 stores target-language metadata by stable timedtext track identity, not only exact URL, so repeated clean timedtext requests with changed volatile parameters can still inherit the translation target; self reload is allowed up to three times.
 - Beta10 keeps pure English viewing untouched, but when a real `tlang` request happens it redirects to a canonical clean URL with stronger no-store headers, reducing the chance that YouTube reuses an earlier in-memory English timedtext response.
+- Beta11 keeps the clean URL parameter order from YouTube's original request for the 302 target while still storing canonical and track-level metadata, and broadens the response pattern to catch long-video timedtext responses more reliably.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
 - The install URL points to the GitHub Release `.sgmodule` asset, and the visible module `version` argument matches the release/tag rather than a self-referential commit hash.
 - README documents current features and design tradeoffs without a long commit-by-commit history.
