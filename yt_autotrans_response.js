@@ -1,14 +1,10 @@
 const REQUEST_TIMEOUT = 5;
 const MAX_URL_LENGTH = 5000;
 const MAX_CHUNKS_PER_RESPONSE = 8;
-const MAX_SEGMENT_WIDTH = 60;
-const MAX_SEGMENT_WORDS = 10;
+const MAX_SEGMENT_WIDTH = 92;
+const MAX_SEGMENT_WORDS = 16;
 const MIN_SENTENCE_WIDTH = 24;
-const ASR_MERGE_WIDTH = 78;
-const ASR_MERGE_WORDS = 14;
-const ASR_MERGE_GAP_MS = 900;
-const ASR_MERGE_DURATION_MS = 6500;
-const CACHE_VERSION = 5;
+const CACHE_VERSION = 6;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -251,7 +247,7 @@ function normalizeTimedtextLayout(input) {
       ah: "50",
       av: "100",
       rc: "2",
-      cc: "40"
+      cc: "80"
     }) + "/>";
   });
 
@@ -444,78 +440,6 @@ function clampOverlappingDurations(items) {
   }
 }
 
-function itemStart(item) {
-  const attrs = parseAttrs(item.attrs);
-  return Number(attrs.t || 0);
-}
-
-function itemEnd(item) {
-  const attrs = parseAttrs(item.attrs);
-  return Number(attrs.t || 0) + Number(attrs.d || 0);
-}
-
-function joinSubtitleText(left, right) {
-  return (String(left || "") + " " + String(right || "")).replace(/\s+/g, " ").trim();
-}
-
-function canMergeAsrItems(current, next) {
-  const currentStart = itemStart(current);
-  const currentEnd = itemEnd(current);
-  const nextStart = itemStart(next);
-  const nextEnd = itemEnd(next);
-  const combinedText = joinSubtitleText(current.text, next.text);
-  const gap = nextStart - currentEnd;
-  const duration = Math.max(currentEnd, nextEnd) - currentStart;
-
-  return (
-    current.text &&
-    next.text &&
-    !endsSentence(current.text) &&
-    !isNaN(currentStart) &&
-    !isNaN(currentEnd) &&
-    !isNaN(nextStart) &&
-    !isNaN(nextEnd) &&
-    nextStart >= currentStart &&
-    gap <= ASR_MERGE_GAP_MS &&
-    duration <= ASR_MERGE_DURATION_MS &&
-    displayWidth(combinedText) <= ASR_MERGE_WIDTH &&
-    tokenCount(combinedText) <= ASR_MERGE_WORDS
-  );
-}
-
-function mergeAsrItems(items) {
-  const merged = [];
-
-  for (let index = 0; index < items.length; index += 1) {
-    const item = Object.assign({}, items[index]);
-
-    if (!item.text) {
-      merged.push(item);
-      continue;
-    }
-
-    while (index + 1 < items.length && canMergeAsrItems(item, items[index + 1])) {
-      const next = items[index + 1];
-      const attrs = parseAttrs(item.attrs);
-      const start = itemStart(item);
-      const end = Math.max(itemEnd(item), itemEnd(next));
-
-      attrs.t = String(start);
-      attrs.d = String(Math.max(1, end - start));
-
-      item.attrs = buildAttrs(attrs);
-      item.text = joinSubtitleText(item.text, next.text);
-      item.paragraphIndexes = (item.paragraphIndexes || [item.paragraphIndex])
-        .concat(next.paragraphIndexes || [next.paragraphIndex]);
-      index += 1;
-    }
-
-    merged.push(item);
-  }
-
-  return merged;
-}
-
 function makeSubtitleText(sourceText, translatedText, options) {
   if (options.showOnly) {
     return translatedText;
@@ -660,7 +584,6 @@ function buildChunks(items) {
 function finish(items, translatedCount, cache, key, options, useAsrLayout) {
   let index = 0;
   const replacements = {};
-  const removedParagraphs = {};
 
   for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
     const item = items[itemIndex];
@@ -671,18 +594,12 @@ function finish(items, translatedCount, cache, key, options, useAsrLayout) {
 
     const text = makeSubtitleText(item.text, item.translated, options);
     const xml = "<p" + item.attrs + "><s ac=\"0\">" + encodeSubtitleText(text) + "</s></p>";
-    const paragraphIndexes = item.paragraphIndexes || [item.paragraphIndex];
-    const firstParagraphIndex = paragraphIndexes[0];
 
-    if (!replacements[firstParagraphIndex]) {
-      replacements[firstParagraphIndex] = "";
+    if (!replacements[item.paragraphIndex]) {
+      replacements[item.paragraphIndex] = "";
     }
 
-    replacements[firstParagraphIndex] += xml;
-
-    for (let removeIndex = 1; removeIndex < paragraphIndexes.length; removeIndex += 1) {
-      removedParagraphs[paragraphIndexes[removeIndex]] = true;
-    }
+    replacements[item.paragraphIndex] += xml;
   }
 
   body = body.replace(pRegex, function (match, attrs, content) {
@@ -690,10 +607,6 @@ function finish(items, translatedCount, cache, key, options, useAsrLayout) {
     index += 1;
 
     if (useAsrLayout && !replacement && isSpacerParagraph(attrs, content)) {
-      return "";
-    }
-
-    if (useAsrLayout && removedParagraphs[index - 1]) {
       return "";
     }
 
@@ -752,7 +665,6 @@ if (!meta) {
   }
 
   if (useAsrLayout) {
-    items = mergeAsrItems(items);
     clampOverlappingDurations(items);
   }
 

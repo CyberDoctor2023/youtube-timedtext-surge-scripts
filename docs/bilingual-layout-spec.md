@@ -27,7 +27,8 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Bilingual line breaks are encoded as `&#x000A;` instead of raw newlines.
 - Empty ASR roll-up spacer paragraphs are removed in translated output.
 - Manual captions and ASR captions are isolated; ASR-only layout fixes do not run on manual captions.
-- Adjacent short ASR paragraphs are merged into longer readable phrases when timing and width allow.
+- ASR caption window column count is widened to allow longer single-line display.
+- ASR internal splitting thresholds are relaxed to avoid one-word or two-word cues.
 - ASR overlapping paragraph durations are clamped before the next caption starts.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
