@@ -31,7 +31,7 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 模块内容：
 
 ```ini
-#!name=YT AutoTrans Error
+#!name=🚫 YT AutoTrans Error
 #!desc=Fix YouTube timedtext auto-translation 429 on Surge.
 #!system=ios
 #!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
