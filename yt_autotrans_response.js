@@ -13,7 +13,7 @@ const SHORT_CONTEXT_WORDS = 16;
 const SHORT_TOKEN_LIMIT = 2;
 const SHORT_DISPLAY_WIDTH = 14;
 const SHORT_DURATION_MS = 1200;
-const CACHE_VERSION = 15;
+const CACHE_VERSION = 16;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -50,6 +50,31 @@ function cacheKey(cleanUrl, targetLang) {
 
 function reloadKey(cleanUrl, targetLang) {
   return "yt_tt_reload_" + hashString(cleanUrl + "|" + targetLang);
+}
+
+function canonicalTimedtextUrl(urlString) {
+  try {
+    const url = new URL(urlString);
+    const pairs = [];
+
+    url.searchParams.forEach(function (value, key) {
+      pairs.push([key, value]);
+    });
+
+    pairs.sort(function (left, right) {
+      if (left[0] === right[0]) {
+        return left[1] < right[1] ? -1 : left[1] > right[1] ? 1 : 0;
+      }
+
+      return left[0] < right[0] ? -1 : 1;
+    });
+
+    return url.origin + url.pathname + "?" + pairs.map(function (pair) {
+      return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(pair[1]);
+    }).join("&");
+  } catch (error) {
+    return urlString;
+  }
 }
 
 function parseArguments() {
@@ -139,7 +164,7 @@ function writeJson(key, value) {
 }
 
 function getMeta() {
-  const meta = readJson(metaKey($request.url));
+  const meta = readJson(metaKey($request.url)) || readJson(metaKey(canonicalTimedtextUrl($request.url)));
 
   if (!meta || !meta.targetLang || !meta.expiresAt || Date.now() > meta.expiresAt) {
     return null;
@@ -719,7 +744,8 @@ function selfReload(cache, cacheStateKey, reloadStateKey) {
       headers: {
         Location: $request.url,
         "Cache-Control": "no-cache",
-        "Content-Type": "text/plain; charset=UTF-8"
+        "Content-Type": "text/plain; charset=UTF-8",
+        "X-YT-AutoTrans": "self-reload"
       },
       body: ""
     }
@@ -769,6 +795,14 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
 
   writeJson(key, cache);
   normalizeHeaders();
+  headers["X-YT-AutoTrans"] =
+    "translated=" +
+    translatedCount +
+    "/" +
+    items.length +
+    ";missing=" +
+    countUntranslatedItems(items) +
+    (status ? ";status=" + status : "");
 
   console.log(
     "YouTube timedtext translated: " +
@@ -799,8 +833,9 @@ if (!meta) {
   console.log("YouTube timedtext skipped same language: " + meta.sourceLang);
   $done({});
 } else {
-  const key = cacheKey($request.url, meta.targetLang);
-  const reloadStateKey = reloadKey($request.url, meta.targetLang);
+  const stateUrl = canonicalTimedtextUrl(meta.cleanUrl || $request.url);
+  const key = cacheKey(stateUrl, meta.targetLang);
+  const reloadStateKey = reloadKey(stateUrl, meta.targetLang);
   const cache = getTranslationCache(key);
   let items = [];
   const useAsrLayout = isAutomaticCaption(body, $request.url);

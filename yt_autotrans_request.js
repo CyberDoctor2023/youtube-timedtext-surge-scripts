@@ -15,6 +15,31 @@ function metaKey(cleanUrl) {
   return "yt_tt_meta_" + hashString(cleanUrl);
 }
 
+function canonicalTimedtextUrl(urlString) {
+  try {
+    const url = new URL(urlString);
+    const pairs = [];
+
+    url.searchParams.forEach(function (value, key) {
+      pairs.push([key, value]);
+    });
+
+    pairs.sort(function (left, right) {
+      if (left[0] === right[0]) {
+        return left[1] < right[1] ? -1 : left[1] > right[1] ? 1 : 0;
+      }
+
+      return left[0] < right[0] ? -1 : 1;
+    });
+
+    return url.origin + url.pathname + "?" + pairs.map(function (pair) {
+      return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(pair[1]);
+    }).join("&");
+  } catch (error) {
+    return urlString;
+  }
+}
+
 try {
   const url = new URL($request.url);
 
@@ -33,11 +58,13 @@ try {
       const meta = {
         sourceLang: sourceLang,
         targetLang: targetLang,
+        cleanUrl: cleanUrl,
         createdAt: Date.now(),
         expiresAt: Date.now() + META_TTL_MS
       };
 
       $persistentStore.write(JSON.stringify(meta), metaKey(cleanUrl));
+      $persistentStore.write(JSON.stringify(meta), metaKey(canonicalTimedtextUrl(cleanUrl)));
 
       console.log(
         "YouTube timedtext redirect cached: " +
