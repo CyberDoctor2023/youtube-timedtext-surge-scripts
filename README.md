@@ -26,6 +26,8 @@
 
 通过 Surge 抓包可以进一步确认：这个 UI 错误对应的是自动翻译字幕接口 `/api/timedtext?...&tlang=...` 的 `HTTP 429`。
 
+![Surge 抓包显示 YouTube timedtext 返回 429](https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/surge-429-response.jpg)
+
 桌面浏览器不是本项目的主要目标。电脑用户通常可以直接使用沉浸式翻译等扩展解决字幕翻译需求。本项目主要解决苹果移动生态里 iPhone / iPad 原生 YouTube App 无法通过浏览器扩展介入的问题。
 
 ### 安装
@@ -331,6 +333,8 @@ In the native YouTube App on iPhone, the user usually sees only a short subtitle
 ![YouTube App subtitle loading error](https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/youtube-subtitle-error.jpg)
 
 Surge traffic capture confirms that this UI error maps to `HTTP 429` from the auto-translate timedtext endpoint `/api/timedtext?...&tlang=...`.
+
+![Surge capture showing YouTube timedtext 429 response](https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/surge-429-response.jpg)
 
 Desktop browsers are not the main target. On desktop, tools such as Immersive Translate can already solve many subtitle translation needs. This project exists for the Apple mobile ecosystem, where the native YouTube app cannot be fixed with normal browser extensions.
 
