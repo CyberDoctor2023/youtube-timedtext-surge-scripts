@@ -2,6 +2,10 @@ const REQUEST_TIMEOUT = 5;
 const MAX_URL_LENGTH = 5000;
 const MAX_CHUNKS_PER_RESPONSE = 8;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_OPTIONS = {
+  bilingual: true,
+  order: "source-target"
+};
 
 let body = $response.body || "";
 let headers = Object.assign({}, $response.headers || {});
@@ -27,6 +31,42 @@ function metaKey(cleanUrl) {
 
 function cacheKey(cleanUrl, targetLang) {
   return "yt_tt_cache_" + hashString(cleanUrl + "|" + targetLang);
+}
+
+function parseArguments() {
+  const options = Object.assign({}, DEFAULT_OPTIONS);
+  let argument = {};
+
+  if (typeof $argument === "string" && $argument) {
+    const pairs = $argument.split("&");
+
+    for (let index = 0; index < pairs.length; index += 1) {
+      const pair = pairs[index].split("=");
+      const key = decodeURIComponent(pair[0] || "");
+      const value = decodeURIComponent(pair.slice(1).join("=") || "");
+
+      if (key) {
+        argument[key] = value;
+      }
+    }
+  } else if (typeof $argument === "object" && $argument) {
+    argument = $argument;
+  }
+
+  if (
+    argument.bilingual === false ||
+    argument.bilingual === "false" ||
+    argument.bilingual === "0" ||
+    argument.bilingual === "no"
+  ) {
+    options.bilingual = false;
+  }
+
+  if (String(argument.order || "") === "target-source") {
+    options.order = "target-source";
+  }
+
+  return options;
 }
 
 function readJson(key) {
@@ -109,6 +149,18 @@ function extractText(content) {
   }
 
   return decodeXml(String(content || "").replace(/<[^>]+>/g, "")).trim();
+}
+
+function makeSubtitleText(sourceText, translatedText, options) {
+  if (!options.bilingual) {
+    return translatedText;
+  }
+
+  if (options.order === "target-source") {
+    return translatedText + "\n" + sourceText;
+  }
+
+  return sourceText + "\n" + translatedText;
 }
 
 function normalizeHeaders() {
@@ -240,7 +292,7 @@ function buildChunks(items) {
   return chunks;
 }
 
-function finish(items, translatedCount, cache, key) {
+function finish(items, translatedCount, cache, key, options) {
   let index = 0;
 
   body = body.replace(pRegex, function (match, attrs, content) {
@@ -251,7 +303,8 @@ function finish(items, translatedCount, cache, key) {
       return match;
     }
 
-    return "<p" + attrs + "><s ac=\"0\">" + encodeXml(item.translated) + "</s></p>";
+    const text = makeSubtitleText(item.text, item.translated, options);
+    return "<p" + attrs + "><s ac=\"0\">" + encodeXml(text) + "</s></p>";
   });
 
   writeJson(key, cache);
@@ -265,6 +318,7 @@ function finish(items, translatedCount, cache, key) {
   });
 }
 
+const options = parseArguments();
 const meta = getMeta();
 
 if (!meta) {
@@ -295,7 +349,7 @@ if (!meta) {
   }
 
   if (items.length === 0) {
-    finish(items, 0, cache, key);
+    finish(items, 0, cache, key, options);
   } else {
     const chunks = buildChunks(items);
     let chunkIndex = 0;
@@ -303,7 +357,7 @@ if (!meta) {
 
     function nextChunk() {
       if (chunkIndex >= chunks.length) {
-        finish(items, translatedCount, cache, key);
+        finish(items, translatedCount, cache, key, options);
         return;
       }
 

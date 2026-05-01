@@ -48,7 +48,7 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 
 [Script]
 youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,argument=bilingual=true&order=source-target,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js
 
 [MITM]
 hostname = %APPEND% www.youtube.com
@@ -57,6 +57,7 @@ hostname = %APPEND% www.youtube.com
 注意：
 
 - Surge 的模块/脚本列表里名称可能不够醒目，因此模块头部包含 `#!icon`。图标使用红色禁止符号和 `429`，用于直接表达“修复 YouTube 自动翻译字幕 429 错误”。
+- `argument=bilingual=true&order=source-target` 表示开启双语字幕，原文在上、翻译在下。若只想显示翻译结果，可改为 `bilingual=false`。
 - 删除旧的、用于删除 `/api/timedtext` 里 `tlang` 的 URL Rewrite。
 - 保留 `www.youtube.com` 的 MITM。
 - 不要把 `translate.googleapis.com` 加进 MITM。它是脚本内部 `$httpClient` 主动请求的翻译接口，不是 YouTube App 发出的被拦截流量，不需要解密。
@@ -460,7 +461,9 @@ YouTube iOS often returns srv3 XML:
 </p>
 ```
 
-The response script preserves the timedtext XML shell and paragraph timing attributes, extracts visible text from nested `<s>` nodes, and writes translated text back as a single `<s ac="0">...</s>` node.
+The response script preserves the timedtext XML shell and paragraph timing attributes, extracts visible text from nested `<s>` nodes, and writes subtitle text back as a single `<s ac="0">...</s>` node.
+
+With `argument=bilingual=true&order=source-target`, each subtitle paragraph shows source text above translated text. Set `bilingual=false` to show translated text only.
 
 ### Cache Strategy
 
