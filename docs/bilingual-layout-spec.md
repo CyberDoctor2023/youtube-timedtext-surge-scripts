@@ -35,6 +35,7 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
 - The install URL points to the GitHub Release `.sgmodule` asset, and the visible module `version` argument matches the release/tag rather than a self-referential commit hash.
 - README documents current features and design tradeoffs without a long commit-by-commit history.
+- README uses a consistent Chinese-first, English-second structure: scope, evidence, install, options, flow, design notes, timedtext handling, cache, verification, limits, acknowledgements, references, and status.
 - Scripts pass `node --check`.
 
 ## Validation Plan
