@@ -5,28 +5,45 @@ function getParam(u, name) {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
+function removeParam(u, name) {
+  const qIndex = u.indexOf("?");
+  if (qIndex === -1) return u;
+
+  const base = u.slice(0, qIndex);
+  const query = u.slice(qIndex + 1);
+
+  const kept = query
+    .split("&")
+    .filter(function (part) {
+      if (!part) return false;
+      return part.split("=")[0] !== name;
+    });
+
+  return kept.length ? base + "?" + kept.join("&") : base;
+}
+
 const target = getParam(url, "tlang");
 
 if (!target) {
   $done({});
 } else {
-  const u = new URL(url);
+  let newUrl = removeParam(url, "tlang");
+  newUrl = removeParam(newUrl, "_yt_x");
+  newUrl = removeParam(newUrl, "_yt_trg");
+  newUrl = removeParam(newUrl, "subtype");
+  newUrl = removeParam(newUrl, "dst");
 
-  // 存目标语言，但不放进最终 URL
-  $persistentStore.write(target, "yt_tt_tlang");
+  let headers = {};
+  for (let k in $request.headers) {
+    headers[k] = $request.headers[k];
+  }
 
-  // 删除会触发 429 的参数
-  u.searchParams.delete("tlang");
-
-  // 清理旧残留
-  u.searchParams.delete("_yt_x");
-  u.searchParams.delete("_yt_trg");
-  u.searchParams.delete("dst");
-
-  // 借鉴 DualSubs：只标记当次请求类型
-  u.searchParams.set("subtype", "Translate");
+  // 只标记当前这一次请求
+  headers["X-YT-TT-Hit"] = "1";
+  headers["X-YT-TT-Target"] = target;
 
   $done({
-    url: u.toString()
+    url: newUrl,
+    headers: headers
   });
 }
