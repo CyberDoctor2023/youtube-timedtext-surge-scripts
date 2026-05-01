@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add optional bilingual timedtext output for YT AutoTrans Error. The first implementation only controls whether each existing timedtext paragraph shows source text above translated text. Centering and sentence grouping are separate follow-up tasks.
+Add optional bilingual timedtext output for YT AutoTrans Error. The first implementation controls whether each existing timedtext paragraph shows source text plus translated text, and exposes that choice through Surge editable module parameters. Centering and sentence grouping are separate follow-up tasks.
 
 ## Non-goals
 
@@ -13,16 +13,17 @@ Add optional bilingual timedtext output for YT AutoTrans Error. The first implem
 
 ## Completion Conditions
 
-- Module exposes parameters for bilingual mode and source/target order.
+- Module exposes Surge editable parameters for bilingual mode and source/target order.
 - Default behavior shows source above translation.
 - Existing translation-only behavior remains available.
+- Older `bilingual/order` script arguments remain compatible.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
 - Scripts pass `node --check`.
 
 ## Validation Plan
 
-- Review DualSubs bundle for parameter and subtitle composition ideas.
-- Verify Surge module parameter syntax against local CLI/help where possible.
+- Review DualSubs Universal template for `#!arguments` / `#!arguments-desc` and subtitle composition ideas.
+- Verify Surge module parameter syntax against local CLI/help and official manual where possible.
 - Run syntax checks for request and response scripts.
 - Search README/module for stale filenames and stale option names.
 

@@ -3,8 +3,8 @@ const MAX_URL_LENGTH = 5000;
 const MAX_CHUNKS_PER_RESPONSE = 8;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
-  bilingual: true,
-  order: "source-target"
+  showOnly: false,
+  position: "Forward"
 };
 
 let body = $response.body || "";
@@ -54,16 +54,33 @@ function parseArguments() {
   }
 
   if (
+    argument.show_only === true ||
+    argument.show_only === "true" ||
+    argument.show_only === "1" ||
+    argument.show_only === "yes" ||
+    argument.ShowOnly === true ||
+    argument.ShowOnly === "true" ||
+    argument.ShowOnly === "1" ||
+    argument.ShowOnly === "yes"
+  ) {
+    options.showOnly = true;
+  }
+
+  if (
     argument.bilingual === false ||
     argument.bilingual === "false" ||
     argument.bilingual === "0" ||
     argument.bilingual === "no"
   ) {
-    options.bilingual = false;
+    options.showOnly = true;
+  }
+
+  if (String(argument.position || argument.Position || "") === "Reverse") {
+    options.position = "Reverse";
   }
 
   if (String(argument.order || "") === "target-source") {
-    options.order = "target-source";
+    options.position = "Reverse";
   }
 
   return options;
@@ -152,11 +169,11 @@ function extractText(content) {
 }
 
 function makeSubtitleText(sourceText, translatedText, options) {
-  if (!options.bilingual) {
+  if (options.showOnly) {
     return translatedText;
   }
 
-  if (options.order === "target-source") {
+  if (options.position === "Reverse") {
     return translatedText + "\n" + sourceText;
   }
 

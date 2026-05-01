@@ -45,10 +45,12 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 #!desc=Fix YouTube timedtext auto-translation 429 on Surge.
 #!system=ios
 #!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
+#!arguments=show_only=false&position=Forward
+#!arguments-desc=[Subtitle]\n\nshow_only: false = bilingual subtitles, true = translated subtitles only.\n\nposition: Forward = source above translation, Reverse = translation above source.
 
 [Script]
 youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,argument=bilingual=true&order=source-target,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,argument=show_only=%show_only%&position=%position%,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js
 
 [MITM]
 hostname = %APPEND% www.youtube.com
@@ -57,7 +59,8 @@ hostname = %APPEND% www.youtube.com
 注意：
 
 - Surge 的模块/脚本列表里名称可能不够醒目，因此模块头部包含 `#!icon`。图标使用红色禁止符号和 `429`，用于直接表达“修复 YouTube 自动翻译字幕 429 错误”。
-- `argument=bilingual=true&order=source-target` 表示开启双语字幕，原文在上、翻译在下。若只想显示翻译结果，可改为 `bilingual=false`。
+- 模块使用 Surge 官方 `#!arguments` 参数表。默认 `show_only=false&position=Forward`，即双语字幕，原文在上、翻译在下。
+- 若只想显示翻译结果，在模块参数里把 `show_only` 改为 `true`。若想翻译在上、原文在下，把 `position` 改为 `Reverse`。
 - 删除旧的、用于删除 `/api/timedtext` 里 `tlang` 的 URL Rewrite。
 - 保留 `www.youtube.com` 的 MITM。
 - 不要把 `translate.googleapis.com` 加进 MITM。它是脚本内部 `$httpClient` 主动请求的翻译接口，不是 YouTube App 发出的被拦截流量，不需要解密。
@@ -277,6 +280,8 @@ DualSubs 启发了这些方向：
 - `tlang` 处理；
 - subtitle mode/type 的设计思路；
 - YouTube caption metadata 的排查方式。
+- Universal 模块的 `#!arguments` / `#!arguments-desc` 参数组织方式；
+- `ShowOnly` 与 `Position` 这种“只显示翻译 / 双语顺序”的字幕输出思路。
 
 但 YT AutoTrans Error 解决的是一个更窄的 Surge/iOS 问题：
 
@@ -288,7 +293,7 @@ DualSubs 主要处理字幕轨道列表和 player response；YT AutoTrans Error 
 
 ### 致谢
 
-- [@DualSubs](https://github.com/orgs/DualSubs/repositories)：感谢其早期对 YouTube captions、`tlang`、字幕模式、语言状态缓存的探索。本项目部分参考了 DualSubs 的设计思路，但实现目标和处理链路更窄。
+- [@DualSubs](https://github.com/orgs/DualSubs/repositories) 与 [DualSubs/Universal](https://github.com/DualSubs/Universal)：感谢其早期对字幕增强、`tlang`、字幕模式、语言状态缓存、模块参数和双语输出设计的探索。本项目部分参考了 DualSubs 的设计思路，但实现目标和处理链路更窄。
 - NodeSeek 社区与 TraderYao：感谢对 YouTube “加载字幕时错误”的排查记录，以及“干净 VPS 出口或海外 SIM 流量可规避中国环境失败”的观察。
 - Reddit、YouTube Help Community、ReVanced Extended 社区：这些报告说明这不是单个用户配置错误，而是长期反复出现的自动翻译字幕可靠性问题。
 - Codex：协助实现脚本、使用 Surge CLI 验证配置、整理 README，并结合真实流量日志迭代调试。
@@ -463,7 +468,7 @@ YouTube iOS often returns srv3 XML:
 
 The response script preserves the timedtext XML shell and paragraph timing attributes, extracts visible text from nested `<s>` nodes, and writes subtitle text back as a single `<s ac="0">...</s>` node.
 
-With `argument=bilingual=true&order=source-target`, each subtitle paragraph shows source text above translated text. Set `bilingual=false` to show translated text only.
+The module exposes Surge editable parameters through `#!arguments`. By default, `show_only=false&position=Forward`, so each subtitle paragraph shows source text above translated text. Set `show_only=true` for translated text only, or set `position=Reverse` to put the translated line above the source line.
 
 ### Cache Strategy
 
@@ -513,11 +518,11 @@ Yes, but do not keep any rule that rewrites `/api/timedtext?...tlang=...` before
 
 This project partially references and learns from the now-broken DualSubs approach and NodeSeek community troubleshooting around YouTube "加载字幕时错误".
 
-DualSubs inspired language-state caching, `tlang` handling, subtitle mode/type thinking, and YouTube caption metadata investigation. But YT AutoTrans Error solves a narrower Surge/iOS problem: only `/api/timedtext` XML response translation after obtaining a clean upstream response.
+DualSubs inspired language-state caching, `tlang` handling, subtitle mode/type thinking, YouTube caption metadata investigation, Universal-style module parameters, and the `ShowOnly` / `Position` idea for bilingual output. But YT AutoTrans Error solves a narrower Surge/iOS problem: only `/api/timedtext` XML response translation after obtaining a clean upstream response.
 
 ### Acknowledgements
 
-- [@DualSubs](https://github.com/orgs/DualSubs/repositories), for earlier exploration of YouTube captions, `tlang`, subtitle modes, and language-state caching.
+- [@DualSubs](https://github.com/orgs/DualSubs/repositories) and [DualSubs/Universal](https://github.com/DualSubs/Universal), for earlier exploration of subtitle enhancement, `tlang`, subtitle modes, language-state caching, module parameters, and bilingual output design.
 - NodeSeek community discussion by TraderYao, for documenting the YouTube "加载字幕时错误" troubleshooting path and the observation that clean VPS exits or overseas SIM traffic can avoid the China-environment failure.
 - Reddit, YouTube Help Community, and ReVanced Extended reports, for showing this is a broader long-running auto-translate subtitle reliability issue rather than a single-user misconfiguration.
 - Codex, for implementation assistance, Surge CLI based verification, README drafting, and iterative debugging with live traffic logs.
