@@ -6,42 +6,40 @@ function getParam(u, name) {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
-function readActiveState(videoId) {
-  const now = Date.now();
-  const keys = [];
+function readPendingState(videoId) {
+  if (!videoId) return null;
 
-  if (videoId) keys.push("yt_translate_state_" + videoId);
-  keys.push("yt_translate_last_state");
+  const key = "yt_translate_pending_" + videoId;
+  const raw = $persistentStore.read(key);
 
-  for (let i = 0; i < keys.length; i++) {
-    const raw = $persistentStore.read(keys[i]);
-    if (!raw) continue;
+  if (!raw) return null;
 
-    try {
-      const state = JSON.parse(raw);
-      const ttl = state.ttl || 180000;
+  try {
+    const state = JSON.parse(raw);
+    const ttl = state.ttl || 30000;
 
-      if (!state.target) continue;
-      if (now - state.time > ttl) continue;
-      if (videoId && state.videoId && state.videoId !== videoId) continue;
+    if (!state.target) return null;
+    if (Date.now() - state.time > ttl) return null;
 
-      return state;
-    } catch (e) {}
+    // 关键：读到后立刻清空，避免后续所有字幕都变测试中文
+    $persistentStore.write("", key);
+
+    return state;
+  } catch (e) {
+    return null;
   }
-
-  return null;
 }
 
 const videoId = getParam(url, "v");
-const state = readActiveState(videoId);
+const state = readPendingState(videoId);
 
-// 没有自动翻译状态：原样放行，普通英文字幕不动
+// 没有 pending：普通字幕完全不改
 if (!state) {
   $done({});
   return;
 }
 
-// 有自动翻译状态：才替换成测试中文
+// 有 pending：只替换这一次
 const regex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
 
 let count = 0;
