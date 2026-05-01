@@ -61,7 +61,7 @@ yt_autotrans_quanx.js
 yt-autotrans.quanx.conf
 ```
 
-Quantumult X 安装说明见 [docs/quantumult-x.md](docs/quantumult-x.md)。
+Quantumult X 安装说明见 [中文说明](docs/quantumult-x.zh.md) / [English guide](docs/quantumult-x.en.md)。
 
 安装后请确认：
 
