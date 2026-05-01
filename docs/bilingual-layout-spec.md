@@ -32,13 +32,13 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Short ASR cues are enriched with nearby context without deleting or merging source paragraphs.
 - ASR overlapping paragraph durations are clamped before the next caption starts.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
-- Response script uses a foreground-response deadline strategy: Google Translate requests time out quickly, beta5 raises chunk throughput and translates the next uncached chunks in timeline order, so repeated timedtext requests caused by seeking can progressively fill the cache instead of reshuffling gaps.
-- Beta6 can simulate one subtitle reload at the HTTP layer: after a successful partial translation pass, it stores the cache and returns a single 302 to the same clean timedtext URL, causing YouTube to request the subtitle track again without requiring the user to toggle CC.
-- Beta7 normalizes timedtext URLs for meta/cache/reload keys and adds an `X-YT-AutoTrans` response header so mobile Surge captures can show translated and missing cue counts directly.
-- Beta8 lowers Google Translate concurrency to reduce full-batch failures and expands diagnostics to include items, cached, requested, ok, fail, missing, and status.
-- Beta9 stores target-language metadata by stable timedtext track identity, not only exact URL, so repeated clean timedtext requests with changed volatile parameters can still inherit the translation target; self reload is allowed up to three times.
-- Beta10 keeps pure English viewing untouched, but when a real `tlang` request happens it redirects to a canonical clean URL with stronger no-store headers, reducing the chance that YouTube reuses an earlier in-memory English timedtext response.
-- Beta11 keeps the clean URL parameter order from YouTube's original request for the 302 target while still storing canonical and track-level metadata, and broadens the response pattern to catch long-video timedtext responses more reliably.
+- Response script uses a foreground-response deadline strategy: Google Translate requests time out quickly, the script translates the next uncached chunks in timeline order, and repeated timedtext requests can progressively fill the cache instead of reshuffling gaps.
+- Response script can simulate subtitle reloads at the HTTP layer after a successful partial translation pass, storing cache first and returning a bounded local 302 to the same clean timedtext URL.
+- State is stored by exact URL, canonical URL, and stable timedtext track identity so repeated clean requests with changed volatile parameters can still inherit the translation target.
+- Mobile Surge captures include `X-YT-AutoTrans` diagnostics when the response script reaches its final response path.
+- Pure English viewing remains untouched; translation behavior only starts after a real `tlang` request is seen.
+- The clean 302 target preserves YouTube's original parameter order after deleting `tlang`, while canonical and track-level metadata are also stored.
+- Known long-video limitations are documented: one-hour-plus `variant=gemini` ASR tracks may use chunked or more aggressive in-app subtitle caching that can bypass reliable foreground response rewriting.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
 - The install URL points to the GitHub Release `.sgmodule` asset, and the visible module `version` argument matches the release/tag rather than a self-referential commit hash.
 - README documents current features and design tradeoffs without a long commit-by-commit history.
@@ -58,4 +58,4 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 
 - Tune timedtext centering further if real iOS captures show a different `wp/ws` enum is needed.
 - Tune ASR grouping with more real auto-generated captions.
-- Test beta branch releases before merging risky timing/cache strategy changes into `main`.
+- Keep long-video behavior under observation; a fully reliable fix may require a local or remote asynchronous translation/cache service rather than a pure Surge foreground script.
