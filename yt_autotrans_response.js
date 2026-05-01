@@ -1,6 +1,10 @@
 const REQUEST_TIMEOUT = 5;
 const MAX_URL_LENGTH = 5000;
 const MAX_CHUNKS_PER_RESPONSE = 8;
+const MAX_SEGMENT_WIDTH = 42;
+const MAX_SEGMENT_WORDS = 7;
+const MIN_SENTENCE_WIDTH = 16;
+const CACHE_VERSION = 2;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -11,7 +15,8 @@ let body = $response.body || "";
 let headers = Object.assign({}, $response.headers || {});
 
 const pRegex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
-const sRegex = /<s\b[^>]*>([\s\S]*?)<\/s>/g;
+const sRegex = /<s\b([^>]*)>([\s\S]*?)<\/s>/g;
+const attrRegex = /\s+([^\s=]+)="([^"]*)"/g;
 const markerRegex = /@@YT(\d+)@@([\s\S]*?)(?=@@YT\d+@@|$)/g;
 
 function hashString(text) {
@@ -132,9 +137,15 @@ function getMeta() {
 function getTranslationCache(key) {
   const cache = readJson(key);
 
-  if (!cache || !cache.items || !cache.expiresAt || Date.now() > cache.expiresAt) {
+  if (
+    !cache ||
+    cache.version !== CACHE_VERSION ||
+    !cache.items ||
+    !cache.expiresAt ||
+    Date.now() > cache.expiresAt
+  ) {
     return {
-      version: 1,
+      version: CACHE_VERSION,
       createdAt: Date.now(),
       expiresAt: Date.now() + CACHE_TTL_MS,
       items: {}
@@ -173,7 +184,7 @@ function extractText(content) {
   sRegex.lastIndex = 0;
 
   while ((match = sRegex.exec(content)) !== null) {
-    text += decodeXml(match[1]);
+    text += decodeXml(match[2]);
   }
 
   if (text.trim()) {
@@ -181,6 +192,172 @@ function extractText(content) {
   }
 
   return decodeXml(String(content || "").replace(/<[^>]+>/g, "")).trim();
+}
+
+function parseAttrs(attrs) {
+  const values = {};
+  let match;
+
+  attrRegex.lastIndex = 0;
+
+  while ((match = attrRegex.exec(attrs || "")) !== null) {
+    values[match[1]] = match[2];
+  }
+
+  return values;
+}
+
+function buildAttrs(values) {
+  let attrs = "";
+  const keys = Object.keys(values || {});
+
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    attrs += " " + key + "=\"" + encodeXml(values[key]) + "\"";
+  }
+
+  return attrs;
+}
+
+function extractSegments(content, duration) {
+  const segments = [];
+  let match;
+
+  sRegex.lastIndex = 0;
+
+  while ((match = sRegex.exec(content)) !== null) {
+    const attrs = parseAttrs(match[1]);
+    const start = Number(attrs.t || 0);
+    const text = decodeXml(match[2]);
+
+    if (text.trim()) {
+      segments.push({
+        start: isNaN(start) ? 0 : start,
+        text: text
+      });
+    }
+  }
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const next = segments[index + 1];
+    const end = next ? next.start : duration;
+    segments[index].duration = Math.max(1, end - segments[index].start);
+  }
+
+  return segments;
+}
+
+function charWidth(char) {
+  return /[^\x00-\xff]/.test(char) ? 2 : 1;
+}
+
+function displayWidth(text) {
+  let width = 0;
+  const value = String(text || "");
+
+  for (let index = 0; index < value.length; index += 1) {
+    width += charWidth(value.charAt(index));
+  }
+
+  return width;
+}
+
+function tokenCount(text) {
+  const value = String(text || "").trim();
+
+  if (!value) {
+    return 0;
+  }
+
+  if (/\s/.test(value)) {
+    return value.split(/\s+/).filter(Boolean).length;
+  }
+
+  return Math.ceil(displayWidth(value) / 2);
+}
+
+function endsSentence(text) {
+  return /[.!?。！？;；:：]\s*$/.test(String(text || ""));
+}
+
+function shouldSplitSegment(currentText, nextText, tokenTotal, previousEndedSentence) {
+  const text = currentText + nextText;
+
+  return (
+    currentText &&
+    (
+      displayWidth(text) > MAX_SEGMENT_WIDTH ||
+      tokenTotal >= MAX_SEGMENT_WORDS ||
+      (previousEndedSentence && displayWidth(currentText.trim()) >= MIN_SENTENCE_WIDTH)
+    )
+  );
+}
+
+function splitContent(attrs, content, paragraphIndex) {
+  const attrMap = parseAttrs(attrs);
+  const duration = Number(attrMap.d || 0);
+  const segments = extractSegments(content, duration);
+
+  if (segments.length <= 1) {
+    return [{
+      paragraphIndex: paragraphIndex,
+      attrs: attrs,
+      text: extractText(content)
+    }];
+  }
+
+  const items = [];
+  let currentText = "";
+  let currentStart = segments[0].start;
+  let tokenTotal = 0;
+  let previousEndedSentence = false;
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const nextText = segment.text;
+
+    if (shouldSplitSegment(currentText, nextText, tokenTotal, previousEndedSentence)) {
+      const nextStart = segment.start;
+      const nextAttrs = Object.assign({}, attrMap, {
+        t: String(Number(attrMap.t || 0) + currentStart),
+        d: String(Math.max(1, nextStart - currentStart))
+      });
+
+      items.push({
+        paragraphIndex: paragraphIndex,
+        attrs: buildAttrs(nextAttrs),
+        text: currentText.trim()
+      });
+
+      currentText = "";
+      currentStart = segment.start;
+      tokenTotal = 0;
+      previousEndedSentence = false;
+    }
+
+    currentText += nextText;
+    tokenTotal += tokenCount(nextText);
+    previousEndedSentence = endsSentence(nextText);
+  }
+
+  if (currentText.trim()) {
+    const nextAttrs = Object.assign({}, attrMap, {
+      t: String(Number(attrMap.t || 0) + currentStart),
+      d: String(Math.max(1, duration - currentStart))
+    });
+
+    items.push({
+      paragraphIndex: paragraphIndex,
+      attrs: buildAttrs(nextAttrs),
+      text: currentText.trim()
+    });
+  }
+
+  return items.length ? items : [{
+    paragraphIndex: paragraphIndex,
+    attrs: attrs,
+    text: extractText(content)
+  }];
 }
 
 function makeSubtitleText(sourceText, translatedText, options) {
@@ -326,17 +503,30 @@ function buildChunks(items) {
 
 function finish(items, translatedCount, cache, key, options) {
   let index = 0;
+  const replacements = {};
 
-  body = body.replace(pRegex, function (match, attrs, content) {
-    const item = items[index];
-    index += 1;
+  for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+    const item = items[itemIndex];
 
-    if (!item || !item.translated) {
-      return match;
+    if (!item.translated) {
+      continue;
     }
 
     const text = makeSubtitleText(item.text, item.translated, options);
-    return "<p" + attrs + "><s ac=\"0\">" + encodeXml(text) + "</s></p>";
+    const xml = "<p" + item.attrs + "><s ac=\"0\">" + encodeXml(text) + "</s></p>";
+
+    if (!replacements[item.paragraphIndex]) {
+      replacements[item.paragraphIndex] = "";
+    }
+
+    replacements[item.paragraphIndex] += xml;
+  }
+
+  body = body.replace(pRegex, function (match, attrs, content) {
+    const replacement = replacements[index];
+    index += 1;
+
+    return replacement || match;
   });
 
   writeJson(key, cache);
@@ -369,15 +559,19 @@ if (!meta) {
   const cache = getTranslationCache(key);
   const items = [];
   let match;
+  let paragraphIndex = 0;
 
   while ((match = pRegex.exec(body)) !== null) {
-    const index = items.length;
-    const cachedText = cache.items[String(index)] || "";
+    const splitItems = splitContent(match[1], match[2], paragraphIndex);
+    paragraphIndex += 1;
 
-    items.push({
-      text: extractText(match[2]),
-      translated: cachedText
-    });
+    for (let splitIndex = 0; splitIndex < splitItems.length; splitIndex += 1) {
+      const index = items.length;
+      const cachedText = splitItems[splitIndex].text ? cache.items[String(index)] || "" : "";
+
+      splitItems[splitIndex].translated = cachedText;
+      items.push(splitItems[splitIndex]);
+    }
   }
 
   if (items.length === 0) {

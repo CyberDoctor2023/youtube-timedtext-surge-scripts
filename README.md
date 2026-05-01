@@ -49,8 +49,8 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 #!arguments-desc=[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
 
 [Script]
-youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,argument=mode={{{mode}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js
+youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=3600,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-update-interval=3600,argument=mode={{{mode}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_response.js
 
 [MITM]
 hostname = %APPEND% www.youtube.com
@@ -61,6 +61,7 @@ hostname = %APPEND% www.youtube.com
 - Surge 的模块/脚本列表里名称可能不够醒目，因此模块头部包含 `#!icon`。图标使用红色禁止符号和 `429`，用于直接表达“修复 YouTube 自动翻译字幕 429 错误”。
 - 模块使用 Surge 参数表。参数只有一个：`mode`，默认值是 `dual`，不手动填写也会启用双语模式。
 - `mode=dual`：双语，原文在上、译文在下，英译中时就是“英中”。`mode=reverse`：双语，译文在上、原文在下，英译中时就是“中英”。`mode=single`：单语，只显示译文。
+- 远程脚本设置了 `script-update-interval=3600`。Surge 会按脚本外部资源机制自动检查更新；刚发布新版本时仍建议手动更新一次 External Resources。
 - 删除旧的、用于删除 `/api/timedtext` 里 `tlang` 的 URL Rewrite。
 - 保留 `www.youtube.com` 的 MITM。
 - 不要把 `translate.googleapis.com` 加进 MITM。它是脚本内部 `$httpClient` 主动请求的翻译接口，不是 YouTube App 发出的被拦截流量，不需要解密。
@@ -186,7 +187,8 @@ YouTube iOS 经常返回 srv3 XML：
 - 保留 `<p>` 的 `t`、`d`、`w`、`a` 等时间属性；
 - 保留空白 spacer 段落；
 - 从嵌套 `<s>` 节点里提取字幕文本；
-- 把翻译结果写回为单个 `<s ac="0">...</s>`。
+- 自动字幕过长时，会按词级 `<s>` 时间戳切成更短的 `<p>` 片段。分句器会参考标点、估算显示宽度和词数，再分别翻译并写回双语文本，减少 iPhone 上原文自动折成两行导致“三行字幕”的概率。
+- 把每个输出片段写回为单个 `<s ac="0">...</s>`。
 
 它不会强行保留原来的逐词 `<s t="...">` 分段，因为英文词级时间戳无法可靠映射到中文、日文、韩文等翻译结果。
 
@@ -466,7 +468,7 @@ YouTube iOS often returns srv3 XML:
 </p>
 ```
 
-The response script preserves the timedtext XML shell and paragraph timing attributes, extracts visible text from nested `<s>` nodes, and writes subtitle text back as a single `<s ac="0">...</s>` node.
+The response script preserves the timedtext XML shell, extracts visible text from nested `<s>` nodes, splits long ASR paragraphs into shorter timed `<p>` segments by punctuation, estimated display width, and token count, then writes each output segment back as a single `<s ac="0">...</s>` node.
 
 The module exposes one Surge editable parameter through `#!arguments`: `mode`. Use `mode=dual` for source above translation, `mode=reverse` for translation above source, and `mode=single` for translation only.
 

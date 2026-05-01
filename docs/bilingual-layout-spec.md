@@ -20,6 +20,8 @@ Add optional bilingual timedtext output for YT AutoTrans Error. The first implem
 - Default behavior shows source above translation.
 - Existing translation-only behavior remains available.
 - Older `bilingual/order` script arguments remain compatible.
+- Long ASR paragraphs are split by timed `<s>` tokens before translation.
+- Splitting considers punctuation, rough display width, and token count.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
 - Scripts pass `node --check`.
 
