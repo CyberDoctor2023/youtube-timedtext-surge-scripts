@@ -46,8 +46,8 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 #!system=ios
 #!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
 #!version=2026.05.01.7
-#!arguments=mode:dual
-#!arguments-desc=[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
+#!arguments=mode:dual,github:d934132
+#!arguments-desc=[GitHub 版本 / GitHub Version]\n\ngithub=d934132：用于和 GitHub commit 对照；脚本不会读取这个参数 / For checking against the GitHub commit. Scripts do not read this parameter.\n\n[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
 
 [Script]
 youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=3600,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js?v=2026.05.01.7
@@ -60,7 +60,8 @@ hostname = %APPEND% www.youtube.com
 注意：
 
 - Surge 的模块/脚本列表里名称可能不够醒目，因此模块头部包含 `#!icon`。图标使用红色禁止符号和 `429`，用于直接表达“修复 YouTube 自动翻译字幕 429 错误”。
-- 模块使用 Surge 参数表。参数只有一个：`mode`，默认值是 `dual`，不手动填写也会启用双语模式。
+- 模块使用 Surge 参数表。主要可调参数是 `mode`，默认值是 `dual`，不手动填写也会启用双语模式。
+- 参数表里还包含 `github`，默认值是 GitHub commit short SHA，方便在 Surge 客户端里对照是否已经更新；脚本不会读取它。
 - `mode=dual`：双语，原文在上、译文在下，英译中时就是“英中”。`mode=reverse`：双语，译文在上、原文在下，英译中时就是“中英”。`mode=single`：单语，只显示译文。
 - 远程脚本设置了 `script-update-interval=3600`，并带有版本参数 `?v=...`。Surge CLI 的 `--help` 只显示了 `external-resource update <key>` 和 `external-resource update all`，没有显示“模块更新时强制刷新全部脚本资源”的模块指令；因此本模块通过 bump `#!version` 和脚本 URL 版本号，让模块更新时脚本 URL 也变化，从而触发重新拉取。
 - 删除旧的、用于删除 `/api/timedtext` 里 `tlang` 的 URL Rewrite。
@@ -264,7 +265,36 @@ external-resource update all
 
 ### 后续迭代记录
 
-README 初版之后，项目继续围绕 iOS YouTube ASR 字幕做了多轮小步修正。下面记录这些后续变更，方便以后回溯为什么代码不是一个简单的“翻译后替换文本”。
+README 初版提交是 `0b27892 docs(readme): document timedtext 429 workaround`。从这个提交之后，项目继续围绕模块化、命名、截图证据、双语模式、ASR 字幕布局做了多轮小步提交。下面按真实 commit 顺序记录这些后续变更，方便以后回溯为什么代码不是一个简单的“翻译后替换文本”。
+
+#### README 初版后的提交索引
+
+- `b5220b6 feat(module): add Surge timedtext module`：新增 Surge `.sgmodule`，把 request/response 脚本作为可安装模块提供，并把 README 安装方式改为模块 URL。
+- `7309b5d docs(readme): acknowledge dualsubs and nodeseek research`：补充 DualSubs、NodeSeek、TraderYao 等参考来源与致谢，说明本项目参考但不直接套用 DualSubs。
+- `3e835ea chore(module): rename to YT AutoTrans`：模块从较长的 timedtext translate 命名收敛为 `YT AutoTrans`，并同步 README。
+- `47ae954 docs(readme): reposition as YT AutoTrans`：把项目定位从单纯脚本调整为面向 YouTube 自动翻译错误的模块化方案。
+- `3887851 docs(readme): add bilingual project presentation`：README 改成中英文结构，开始面向中文和英文读者说明安装、原理和限制。
+- `d38863a docs(readme): clarify ios scope and error naming`：明确目标是 iPhone / iPad 原生 YouTube App，不把桌面浏览器场景作为主要对象。
+- `45301cd docs(readme): split languages and add module icon`：README 改为上方语言跳转、中文优先、英文在后；新增模块 icon。
+- `a1f0faf chore(module): add warning emoji to title`：尝试在模块标题加入警示 emoji，让 Surge 列表里更醒目。
+- `364c38c chore(module): use key emoji in title`：最终把模块标题 emoji 调整为 `🗝️`。
+- `b546003 docs(readme): add youtube subtitle error screenshot`：加入 YouTube App “加载字幕时出错”截图作为用户可见错误案例。
+- `ce1fbe6 docs(readme): add surge 429 evidence screenshot`：加入 Surge 抓包 `HTTP/1.1 429 Too Many Requests` 截图，说明 UI 错误对应 timedtext 429。
+- `44cdaf8 chore(scripts): align filenames with yt autotrans`：把脚本文件名从 `youtube_timedtext_*` 改为 `yt_autotrans_*`，和仓库/模块命名对齐。
+- `2f583dc feat(subtitles): add bilingual output option`：新增双语输出能力，支持原文 + 译文，而不是只输出单语翻译。
+- `1f6d710 feat(module): expose subtitle parameters`：把字幕显示方式暴露成 Surge 模块参数。
+- `dc7e393 feat(module): simplify subtitle mode setting`：把参数收敛为单个 `mode`，降低用户配置成本。
+- `1539734 fix(module): broaden timedtext request match`：曾尝试放宽 request 匹配范围，目的是减少漏拦截。
+- `4a4cb0d fix(module): set default subtitle mode`：修正默认参数，确保用户不手动填写也默认启用 `mode=dual`；同时避免过度放宽 request pattern 误伤普通 timedtext。
+- `738379b feat(subtitles): segment long timedtext cues`：对过长 ASR timedtext cue 做词级切分，减少长句双语显示拥挤。
+- `dce9a9e feat(subtitles): center asr timedtext layout`：新增 ASR 窗口居中与版本化脚本 URL。
+- `e074bf3 fix(subtitles): preserve bilingual line breaks`：双语换行改为 `&#x000A;`，删除 ASR 空白 spacer。
+- `1d58c07 fix(subtitles): isolate asr layout handling`：人工字幕和 ASR 字幕隔离；ASR 专属处理不再套到人工字幕。
+- `e4b5589 fix(subtitles): merge short asr captions`：尝试跨 `<p>` 合并短 ASR 字幕，后续因稳定性问题撤回。
+- `fc39f10 fix(subtitles): widen asr caption lines`：撤回跨段删除式合并，改为增大 `cc` 显示列宽和放宽切分阈值。
+- `05e137d fix(subtitles): add context to short asr cues`：对很短的 ASR cue 补入相邻上下文，不删除原始 `<p>`。
+- `d934132 docs(readme): document subtitle iteration history`：补充后续迭代和踩坑记录。
+- 当前版本还在参数表中加入 `github=d934132`，方便在 Surge 里和 GitHub commit 对照。
 
 #### `2026.05.01.2`：模块资源更新与 ASR 居中
 
@@ -483,6 +513,7 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 Important:
 
 - The Surge module/script list may not show the script name prominently, so the module includes `#!icon`. The icon uses a red prohibition mark and `429` to make the purpose recognizable at a glance.
+- The module arguments include `github`, whose default value is a GitHub commit short SHA. It is only a visible version marker in Surge; scripts do not read it.
 - Remote scripts use `script-update-interval=3600` and versioned URLs such as `?v=2026.05.01.7`. The local Surge CLI help exposes `external-resource update <key>` and `external-resource update all`, but no module directive that forcibly refreshes all external scripts when a module is updated. Versioned script URLs make each release a new resource URL, so Surge fetches the current scripts after module updates.
 - Remove old `/api/timedtext` URL Rewrite rules that delete `tlang`.
 - Keep MITM enabled for `www.youtube.com`.
@@ -648,7 +679,36 @@ The local Surge CLI help exposes `external-resource update <key>` and `external-
 
 ### Iteration Log
 
-After the first README draft, the project continued through several iOS ASR subtitle fixes. This log records what changed after the initial documentation, including the approaches that were later reverted.
+The first README commit was `0b27892 docs(readme): document timedtext 429 workaround`. After that, the project continued through module packaging, naming, screenshots, bilingual display, module parameters, and ASR subtitle layout fixes. This section records the actual commits after the initial README.
+
+#### Commit Index After The Initial README
+
+- `b5220b6 feat(module): add Surge timedtext module`: added the `.sgmodule` installer and documented module-based installation.
+- `7309b5d docs(readme): acknowledge dualsubs and nodeseek research`: credited DualSubs, NodeSeek, and TraderYao, while clarifying that this project only borrows ideas.
+- `3e835ea chore(module): rename to YT AutoTrans`: renamed the module toward the shorter `YT AutoTrans` identity.
+- `47ae954 docs(readme): reposition as YT AutoTrans`: repositioned the project as a YouTube auto-translation error module, not just a pair of scripts.
+- `3887851 docs(readme): add bilingual project presentation`: reorganized README into Chinese and English sections.
+- `d38863a docs(readme): clarify ios scope and error naming`: clarified that the main target is the native iPhone / iPad YouTube app.
+- `45301cd docs(readme): split languages and add module icon`: added language navigation and the module icon.
+- `a1f0faf chore(module): add warning emoji to title`: tried a warning emoji in the module title.
+- `364c38c chore(module): use key emoji in title`: changed the title emoji to `🗝️`.
+- `b546003 docs(readme): add youtube subtitle error screenshot`: added the YouTube app error screenshot.
+- `ce1fbe6 docs(readme): add surge 429 evidence screenshot`: added the Surge `429 Too Many Requests` capture screenshot.
+- `44cdaf8 chore(scripts): align filenames with yt autotrans`: renamed scripts from `youtube_timedtext_*` to `yt_autotrans_*`.
+- `2f583dc feat(subtitles): add bilingual output option`: added bilingual output support.
+- `1f6d710 feat(module): expose subtitle parameters`: exposed subtitle display choices through module parameters.
+- `dc7e393 feat(module): simplify subtitle mode setting`: simplified configuration to one `mode` parameter.
+- `1539734 fix(module): broaden timedtext request match`: briefly broadened the timedtext request match to reduce missed interception.
+- `4a4cb0d fix(module): set default subtitle mode`: restored a safer request match and made `mode=dual` the default.
+- `738379b feat(subtitles): segment long timedtext cues`: split long word-timed ASR cues.
+- `dce9a9e feat(subtitles): center asr timedtext layout`: added ASR layout normalization and versioned script URLs.
+- `e074bf3 fix(subtitles): preserve bilingual line breaks`: switched bilingual line breaks to `&#x000A;` and removed ASR spacers.
+- `1d58c07 fix(subtitles): isolate asr layout handling`: separated manual-caption handling from ASR-specific handling.
+- `e4b5589 fix(subtitles): merge short asr captions`: tried cross-`<p>` short cue merging; later reverted due to instability.
+- `fc39f10 fix(subtitles): widen asr caption lines`: removed cross-`<p>` deletion-style merging and widened ASR caption lines.
+- `05e137d fix(subtitles): add context to short asr cues`: enriched short ASR cues with nearby context without deleting source paragraphs.
+- `d934132 docs(readme): document subtitle iteration history`: added the iteration history itself.
+- The current module also exposes `github=d934132` in the parameter table so users can compare the Surge-installed module with the GitHub commit.
 
 #### `2026.05.01.2`: resource versioning and ASR centering
 

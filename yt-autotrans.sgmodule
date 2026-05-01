@@ -3,8 +3,8 @@
 #!system=ios
 #!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
 #!version=2026.05.01.7
-#!arguments=mode:dual
-#!arguments-desc=[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
+#!arguments=mode:dual,github:d934132
+#!arguments-desc=[GitHub 版本 / GitHub Version]\n\ngithub=d934132：用于和 GitHub commit 对照；脚本不会读取这个参数 / For checking against the GitHub commit. Scripts do not read this parameter.\n\n[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
 
 [Script]
 youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=3600,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt_autotrans_request.js?v=2026.05.01.7
