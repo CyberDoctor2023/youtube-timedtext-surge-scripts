@@ -4,7 +4,12 @@ const MAX_CHUNKS_PER_RESPONSE = 8;
 const MAX_SEGMENT_WIDTH = 92;
 const MAX_SEGMENT_WORDS = 16;
 const MIN_SENTENCE_WIDTH = 24;
-const CACHE_VERSION = 6;
+const SHORT_CONTEXT_WIDTH = 92;
+const SHORT_CONTEXT_WORDS = 16;
+const SHORT_TOKEN_LIMIT = 2;
+const SHORT_DISPLAY_WIDTH = 14;
+const SHORT_DURATION_MS = 1200;
+const CACHE_VERSION = 7;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -440,6 +445,65 @@ function clampOverlappingDurations(items) {
   }
 }
 
+function itemNumberAttr(item, key) {
+  const attrs = parseAttrs(item.attrs);
+  return Number(attrs[key] || 0);
+}
+
+function itemDuration(item) {
+  return itemNumberAttr(item, "d");
+}
+
+function joinSubtitleText(left, right) {
+  return (String(left || "") + " " + String(right || "")).replace(/\s+/g, " ").trim();
+}
+
+function isBracketCue(text) {
+  return /^\s*\[[^\]]+\]\s*$/.test(String(text || ""));
+}
+
+function isShortCue(item) {
+  return (
+    item &&
+    item.text &&
+    !isBracketCue(item.text) &&
+    (
+      tokenCount(item.text) <= SHORT_TOKEN_LIMIT ||
+      displayWidth(item.text) <= SHORT_DISPLAY_WIDTH ||
+      itemDuration(item) <= SHORT_DURATION_MS
+    )
+  );
+}
+
+function canUseContext(text) {
+  return (
+    text &&
+    displayWidth(text) <= SHORT_CONTEXT_WIDTH &&
+    tokenCount(text) <= SHORT_CONTEXT_WORDS
+  );
+}
+
+function addShortCueContext(items) {
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+
+    if (!isShortCue(item)) {
+      continue;
+    }
+
+    const previous = items[index - 1];
+    const next = items[index + 1];
+    const previousText = previous && previous.text ? joinSubtitleText(previous.text, item.text) : "";
+    const nextText = next && next.text ? joinSubtitleText(item.text, next.text) : "";
+
+    if (previousText && !endsSentence(previous.text) && canUseContext(previousText)) {
+      item.text = previousText;
+    } else if (nextText && !endsSentence(item.text) && canUseContext(nextText)) {
+      item.text = nextText;
+    }
+  }
+}
+
 function makeSubtitleText(sourceText, translatedText, options) {
   if (options.showOnly) {
     return translatedText;
@@ -665,6 +729,7 @@ if (!meta) {
   }
 
   if (useAsrLayout) {
+    addShortCueContext(items);
     clampOverlappingDurations(items);
   }
 

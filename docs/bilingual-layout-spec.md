@@ -29,6 +29,7 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Manual captions and ASR captions are isolated; ASR-only layout fixes do not run on manual captions.
 - ASR caption window column count is widened to allow longer single-line display.
 - ASR internal splitting thresholds are relaxed to avoid one-word or two-word cues.
+- Short ASR cues are enriched with nearby context without deleting or merging source paragraphs.
 - ASR overlapping paragraph durations are clamped before the next caption starts.
 - Response script keeps `<p>` timing attributes and only replaces subtitle text content.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
