@@ -1,6 +1,6 @@
 let url = $request.url;
 
-const ACTIVE_TTL = 180000; // 3分钟
+const ACTIVE_TTL = 30000; // 30秒，只用于下一次 response
 
 function getParam(u, name) {
   const m = u.match(new RegExp("[?&]" + name + "=([^&]+)"));
@@ -28,27 +28,18 @@ function removeParam(u, name) {
 const videoId = getParam(url, "v");
 const target = getParam(url, "tlang");
 
-// 只有用户点“自动翻译”时才会有 tlang
-if (target) {
+if (target && videoId) {
   const state = JSON.stringify({
-    videoId: videoId || "",
+    videoId: videoId,
     target: target,
     time: Date.now(),
     ttl: ACTIVE_TTL
   });
 
-  // 按视频保存
-  if (videoId) {
-    $persistentStore.write(state, "yt_translate_state_" + videoId);
-  }
+  // 只存当前视频的一次性 pending，不再存全局 last_state
+  $persistentStore.write(state, "yt_translate_pending_" + videoId);
 
-  // 兜底保存
-  $persistentStore.write(state, "yt_translate_last_state");
-
-  // 删除会触发 429 的参数
   let newUrl = removeParam(url, "tlang");
-
-  // 清理旧残留
   newUrl = removeParam(newUrl, "_yt_x");
   newUrl = removeParam(newUrl, "_yt_trg");
 
