@@ -1,105 +1,65 @@
-const TARGET_LANG = "zh-CN";
-let body = $response.body || "";
+const META_TTL_MS = 10 * 60 * 1000;
 
-function decodeXml(str) {
-  return str
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&nbsp;/g, " ");
+function hashString(text) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+
+  return (hash >>> 0).toString(16);
 }
 
-function encodeXml(str) {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+function metaKey(cleanUrl) {
+  return "yt_tt_meta_" + hashString(cleanUrl);
 }
 
-function translateOne(text, callback) {
-  const url =
-    "https://translate.googleapis.com/translate_a/single" +
-    "?client=gtx" +
-    "&sl=auto" +
-    "&tl=" + TARGET_LANG +
-    "&dt=t" +
-    "&q=" + encodeURIComponent(text);
+try {
+  const url = new URL($request.url);
 
-  $httpClient.get(url, function (error, response, data) {
-    if (error || !data) {
-      console.log("翻译失败，保留原文: " + text);
-      callback(text);
-      return;
-    }
+  if (url.hostname !== "www.youtube.com" || url.pathname !== "/api/timedtext") {
+    $done({});
+  } else {
+    const sourceLang = url.searchParams.get("lang") || "auto";
+    const targetLang = url.searchParams.get("tlang");
 
-    try {
-      const json = JSON.parse(data);
-      const translated = json[0].map(x => x[0]).join("");
-      callback(translated || text);
-    } catch (e) {
-      console.log("翻译解析失败，保留原文: " + e);
-      callback(text);
-    }
-  });
-}
+    if (!targetLang) {
+      $done({});
+    } else {
+      url.searchParams.delete("tlang");
 
-const regex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
-const matches = [...body.matchAll(regex)];
+      const cleanUrl = url.toString();
+      const meta = {
+        sourceLang: sourceLang,
+        targetLang: targetLang,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + META_TTL_MS
+      };
 
-if (!matches.length) {
-  console.log("没找到 <p> 字幕节点");
-  $done({ body });
-} else {
-  console.log("找到字幕条数: " + matches.length);
+      $persistentStore.write(JSON.stringify(meta), metaKey(cleanUrl));
 
-  let originals = matches.map(m =>
-    decodeXml(m[2]).replace(/\s+/g, " ").trim()
-  );
+      console.log(
+        "YouTube timedtext redirect cached: " +
+          sourceLang +
+          " -> " +
+          targetLang
+      );
 
-  let translated = new Array(originals.length);
-  let finished = 0;
-
-  originals.forEach((text, index) => {
-    if (!text) {
-      translated[index] = "";
-      finished++;
-      return;
-    }
-
-    translateOne(text, function (zh) {
-      translated[index] = zh;
-      finished++;
-
-      if (finished === originals.length) {
-        let i = 0;
-
-        body = body.replace(regex, function (match, attrs, content) {
-          const original = decodeXml(content).replace(/\s+/g, " ").trim();
-
-          if (!original) return match;
-
-          const zh = translated[i] || original;
-          i++;
-
-          return `<p${attrs}>${encodeXml(zh)}</p>`;
-        });
-
-        console.log("字幕翻译完成，替换数量: " + i);
-
-        $done({
-          body,
+      $done({
+        response: {
+          status: 302,
           headers: {
-            ...$response.headers,
-            "Content-Encoding": "identity",
-            "Content-Type": "text/xml; charset=UTF-8"
-          }
-        });
-      }
-    });
-  });
+            Location: cleanUrl,
+            "Cache-Control": "no-cache",
+            "Content-Type": "text/plain; charset=UTF-8"
+          },
+          body: ""
+        }
+      });
+    }
+  }
+} catch (error) {
+  console.log("YouTube timedtext request script error: " + error);
+  $done({});
 }

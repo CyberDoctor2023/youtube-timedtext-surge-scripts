@@ -1,9 +1,7 @@
-const TARGET_LANG = "zh-CN";
-const SOURCE_LANG = "auto";
-const TRANSLATE_SOURCE_LANGS = ["en"];
 const REQUEST_TIMEOUT = 5;
 const MAX_URL_LENGTH = 5000;
-const MAX_CHUNKS = 8;
+const MAX_CHUNKS_PER_RESPONSE = 8;
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 let body = $response.body || "";
 let headers = Object.assign({}, $response.headers || {});
@@ -12,23 +10,67 @@ const pRegex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
 const sRegex = /<s\b[^>]*>([\s\S]*?)<\/s>/g;
 const markerRegex = /@@YT(\d+)@@([\s\S]*?)(?=@@YT\d+@@|$)/g;
 
-function getRequestSourceLang() {
+function hashString(text) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+
+  return (hash >>> 0).toString(16);
+}
+
+function metaKey(cleanUrl) {
+  return "yt_tt_meta_" + hashString(cleanUrl);
+}
+
+function cacheKey(cleanUrl, targetLang) {
+  return "yt_tt_cache_" + hashString(cleanUrl + "|" + targetLang);
+}
+
+function readJson(key) {
+  const raw = $persistentStore.read(key);
+
+  if (!raw) {
+    return null;
+  }
+
   try {
-    const url = new URL($request.url);
-    return String(url.searchParams.get("lang") || "").toLowerCase();
+    return JSON.parse(raw);
   } catch (e) {
-    return "";
+    return null;
   }
 }
 
-function shouldTranslateSourceLang(lang) {
-  if (!lang) {
-    return false;
+function writeJson(key, value) {
+  $persistentStore.write(JSON.stringify(value), key);
+}
+
+function getMeta() {
+  const meta = readJson(metaKey($request.url));
+
+  if (!meta || !meta.targetLang || !meta.expiresAt || Date.now() > meta.expiresAt) {
+    return null;
   }
 
-  return TRANSLATE_SOURCE_LANGS.some(function (allowedLang) {
-    return lang === allowedLang || lang.indexOf(allowedLang + "-") === 0;
-  });
+  return meta;
+}
+
+function getTranslationCache(key) {
+  const cache = readJson(key);
+
+  if (!cache || !cache.items || !cache.expiresAt || Date.now() > cache.expiresAt) {
+    return {
+      version: 1,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      items: {}
+    };
+  }
+
+  cache.expiresAt = Date.now() + CACHE_TTL_MS;
+  return cache;
 }
 
 function decodeXml(text) {
@@ -83,30 +125,6 @@ function normalizeHeaders() {
   headers["Content-Type"] = "text/xml; charset=UTF-8";
 }
 
-function finish(items, translatedCount) {
-  let index = 0;
-
-  body = body.replace(pRegex, function (match, attrs, content) {
-    const item = items[index];
-    index += 1;
-
-    if (!item || !item.translated) {
-      return match;
-    }
-
-    return "<p" + attrs + "><s ac=\"0\">" + encodeXml(item.translated) + "</s></p>";
-  });
-
-  normalizeHeaders();
-
-  console.log("YouTube timedtext translated: " + translatedCount + "/" + items.length);
-
-  $done({
-    body: body,
-    headers: headers
-  });
-}
-
 function parseGoogleTranslate(data) {
   const json = JSON.parse(data);
   let result = "";
@@ -124,11 +142,11 @@ function parseGoogleTranslate(data) {
   return result;
 }
 
-function translateText(text, callback) {
+function translateText(text, sourceLang, targetLang, callback) {
   const url =
     "https://translate.googleapis.com/translate_a/single?client=gtx" +
-    "&sl=" + encodeURIComponent(SOURCE_LANG) +
-    "&tl=" + encodeURIComponent(TARGET_LANG) +
+    "&sl=" + encodeURIComponent(sourceLang || "auto") +
+    "&tl=" + encodeURIComponent(targetLang) +
     "&dt=t&q=" + encodeURIComponent(text);
 
   $httpClient.get(
@@ -160,7 +178,7 @@ function makeMarkedText(chunk) {
   }).join("\n");
 }
 
-function applyMarkedTranslations(translatedText, items) {
+function applyMarkedTranslations(translatedText, items, cache) {
   let match;
   let count = 0;
 
@@ -172,6 +190,7 @@ function applyMarkedTranslations(translatedText, items) {
 
     if (items[index] && text) {
       items[index].translated = text;
+      cache.items[String(index)] = text;
       count += 1;
     }
   }
@@ -185,7 +204,7 @@ function buildChunks(items) {
   let currentText = "";
 
   for (let index = 0; index < items.length; index += 1) {
-    if (!items[index].text) {
+    if (!items[index].text || items[index].translated) {
       continue;
     }
 
@@ -209,36 +228,74 @@ function buildChunks(items) {
       currentText = nextText;
     }
 
-    if (chunks.length >= MAX_CHUNKS) {
+    if (chunks.length >= MAX_CHUNKS_PER_RESPONSE) {
       break;
     }
   }
 
-  if (current.length > 0 && chunks.length < MAX_CHUNKS) {
+  if (current.length > 0 && chunks.length < MAX_CHUNKS_PER_RESPONSE) {
     chunks.push(current);
   }
 
   return chunks;
 }
 
-const items = [];
-let match;
-const sourceLang = getRequestSourceLang();
+function finish(items, translatedCount, cache, key) {
+  let index = 0;
 
-if (!shouldTranslateSourceLang(sourceLang)) {
-  console.log("YouTube timedtext skipped source lang: " + (sourceLang || "unknown"));
+  body = body.replace(pRegex, function (match, attrs, content) {
+    const item = items[index];
+    index += 1;
+
+    if (!item || !item.translated) {
+      return match;
+    }
+
+    return "<p" + attrs + "><s ac=\"0\">" + encodeXml(item.translated) + "</s></p>";
+  });
+
+  writeJson(key, cache);
+  normalizeHeaders();
+
+  console.log("YouTube timedtext translated: " + translatedCount + "/" + items.length);
+
+  $done({
+    body: body,
+    headers: headers
+  });
+}
+
+const meta = getMeta();
+
+if (!meta) {
+  console.log("YouTube timedtext skipped: no target language metadata");
+  $done({});
+} else if (
+  meta.sourceLang &&
+  meta.targetLang &&
+  meta.sourceLang.split(/[-_]/)[0].toLowerCase() ===
+    meta.targetLang.split(/[-_]/)[0].toLowerCase()
+) {
+  console.log("YouTube timedtext skipped same language: " + meta.sourceLang);
   $done({});
 } else {
+  const key = cacheKey($request.url, meta.targetLang);
+  const cache = getTranslationCache(key);
+  const items = [];
+  let match;
 
   while ((match = pRegex.exec(body)) !== null) {
+    const index = items.length;
+    const cachedText = cache.items[String(index)] || "";
+
     items.push({
       text: extractText(match[2]),
-      translated: ""
+      translated: cachedText
     });
   }
 
   if (items.length === 0) {
-    finish(items, 0);
+    finish(items, 0, cache, key);
   } else {
     const chunks = buildChunks(items);
     let chunkIndex = 0;
@@ -246,20 +303,25 @@ if (!shouldTranslateSourceLang(sourceLang)) {
 
     function nextChunk() {
       if (chunkIndex >= chunks.length) {
-        finish(items, translatedCount);
+        finish(items, translatedCount, cache, key);
         return;
       }
 
       const chunk = chunks[chunkIndex];
       chunkIndex += 1;
 
-      translateText(makeMarkedText(chunk), function (translatedText) {
-        if (translatedText) {
-          translatedCount += applyMarkedTranslations(translatedText, items);
-        }
+      translateText(
+        makeMarkedText(chunk),
+        meta.sourceLang || "auto",
+        meta.targetLang,
+        function (translatedText) {
+          if (translatedText) {
+            translatedCount += applyMarkedTranslations(translatedText, items, cache);
+          }
 
-        nextChunk();
-      });
+          nextChunk();
+        }
+      );
     }
 
     nextChunk();
