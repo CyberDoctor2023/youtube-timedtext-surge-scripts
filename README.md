@@ -1,37 +1,34 @@
 # YT AutoTrans
 
-YT AutoTrans is a Surge module for fixing the long-running YouTube/Google auto-translated subtitle failure where `/api/timedtext` requests with `tlang` return HTTP 429 or show "error loading subtitles" in the YouTube app.
+![Surge](https://img.shields.io/badge/Surge-iOS%20%2F%20Mac-18A0FB)
+![YouTube](https://img.shields.io/badge/YouTube-TimedText-FF0000)
+![Module](https://img.shields.io/badge/Module-sgmodule-34C759)
+![Status](https://img.shields.io/badge/Status-Verified-brightgreen)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-This repository targets a problem that has been reported repeatedly by global users across YouTube Help Community, Reddit, ReVanced Extended, NodeSeek, and other communities. The failure has often appeared to be fixed, partially fixed, or platform-specific, but it continues to recur for real users, especially in China-mainland-facing proxy/airport environments with unclean exit IPs. YT AutoTrans fixes the Surge/iOS path by preventing the fragile `tlang` request from ever reaching YouTube, while still preserving the user's requested target language locally.
+**YT AutoTrans** is a Surge module that fixes the long-running YouTube auto-translated subtitle failure where `/api/timedtext` requests with `tlang` return HTTP 429 or the YouTube app shows "error loading subtitles".
 
-In short:
+**YT AutoTrans** 是一个 Surge 模块，用于修复 YouTube 自动翻译字幕长期反复出现的失败问题：当 YouTube App 请求 `/api/timedtext?...&tlang=...` 时，接口可能返回 HTTP 429，或者 App 显示“加载字幕时错误”。
 
-```text
-YouTube App asks for auto-translation -> Surge keeps tlang locally
-Surge redirects the app to a clean URL -> YouTube returns original subtitles
-Surge translates the timedtext XML locally -> YouTube App displays translated subtitles
-```
+This repository targets an issue repeatedly reported by global users across YouTube Help Community, Reddit, ReVanced Extended, NodeSeek, and other communities. The issue has appeared fixed, partially fixed, platform-specific, or network-specific at different times, but it continues to recur in real-world use. It is especially easy to reproduce in China-mainland-facing proxy/airport environments with unclean exit IPs.
 
-The current solution has been verified with YouTube iOS timedtext traffic:
+本仓库解决的是一个被全球用户反复报告、长期未彻底消失的问题。它在 YouTube Help Community、Reddit、ReVanced Extended、NodeSeek 等社区都有讨论；有时看似被 Google/YouTube 修复，有时只在部分平台恢复，但实际仍会复现。尤其在中国大陆相关代理/机场环境、出口 IP 不够干净时更容易触发。
 
-- original translated subtitle request contains `lang=<source>&tlang=<target>`;
-- the first request is intercepted locally and never sent to YouTube;
-- Surge returns a local `302` to the same timedtext URL without `tlang`;
-- YouTube receives only the clean URL and returns the original subtitle XML;
-- the response script translates the timedtext XML locally to the original `tlang`;
-- ordinary subtitle requests without `tlang` are left untouched.
+## Install / 安装
 
-## Install As A Surge Module
-
-Recommended module URL:
+Surge module URL:
 
 ```text
 https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans.sgmodule
 ```
 
-The module contains:
+Module content:
 
 ```ini
+#!name=YT AutoTrans
+#!desc=Fix YouTube timedtext auto-translation 429 on Surge.
+#!system=ios
+
 [Script]
 youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/youtube_timedtext_request.js
 youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/youtube_timedtext_response.js
@@ -40,115 +37,136 @@ youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\
 hostname = %APPEND% www.youtube.com
 ```
 
-Do not keep old timedtext rewrite rules in another module or profile section. This module must see the original `tlang` request before it is redirected.
+Important:
 
-## Background
+- Remove old `/api/timedtext` URL Rewrite rules that delete `tlang`.
+- Keep MITM enabled for `www.youtube.com`.
+- Do **not** add `translate.googleapis.com` to MITM. It is called by Surge's `$httpClient` inside the script; the app traffic does not need to be decrypted there.
 
-YouTube's subtitle auto-translate path commonly requests:
+注意：
+
+- 删除旧的、用于删除 `/api/timedtext` 里 `tlang` 的 URL Rewrite。
+- 保留 `www.youtube.com` 的 MITM。
+- **不要**把 `translate.googleapis.com` 加进 MITM。它是脚本内部 `$httpClient` 主动请求的翻译接口，不是 YouTube App 发出的被拦截流量，不需要解密。
+
+## How It Works / 工作原理
+
+```text
+YouTube App
+  |
+  | 1. /api/timedtext?...&lang=en&tlang=ja
+  v
+Surge http-request script
+  |
+  | 2. Save metadata: cleanUrl -> en -> ja
+  | 3. Return local 302 Location: cleanUrl
+  v
+YouTube App follows redirect
+  |
+  | 4. /api/timedtext?...&lang=en
+  v
+YouTube server
+  |
+  | 5. 200 OK original timedtext XML
+  v
+Surge http-response script
+  |
+  | 6. Read metadata, translate XML locally
+  v
+YouTube App displays translated subtitles
+```
+
+```text
+YouTube App 原始请求
+  |
+  | 1. /api/timedtext?...&lang=en&tlang=ja
+  v
+Surge 请求脚本
+  |
+  | 2. 保存 cleanUrl -> en -> ja
+  | 3. 本地返回 302 Location: cleanUrl
+  v
+YouTube App 跟随重定向
+  |
+  | 4. /api/timedtext?...&lang=en
+  v
+YouTube 服务端
+  |
+  | 5. 返回 200 OK 原始字幕 XML
+  v
+Surge 响应脚本
+  |
+  | 6. 读取目标语言，本地翻译 XML
+  v
+YouTube App 显示翻译字幕
+```
+
+## Why This Fixes 429 / 为什么能绕过 429
+
+YouTube's auto-translate request usually contains `tlang`:
 
 ```text
 https://www.youtube.com/api/timedtext?...&lang=en&tlang=zh-Hans&format=srv3
 ```
 
-In affected environments, the final request containing `tlang` receives:
+In affected environments, the final upstream request with `tlang` can return:
 
 ```text
 HTTP/1.1 429 Too Many Requests
 ```
 
-This has been especially reproducible in China-mainland-facing proxy or airport environments, where YouTube timedtext auto-translation requests routed through certain exit IPs appear to be rate-limited or rejected even when normal subtitle requests still work. In community testing, the issue often disappeared when using a clean VPS exit, overseas SIM/mobile data, or otherwise cleaner nodes. The practical symptom is simple: original-language subtitles load, but auto-translated subtitles fail.
+YT AutoTrans prevents that final upstream request from happening:
 
-This is not an isolated local configuration problem. Users have reported broken YouTube auto-translated subtitles across countries, devices, and apps. A ReVanced Extended issue also documents that unpatched YouTube auto-translated subtitle requests with the `tlang` query parameter can return 429, even when a normal rate limit has not actually been reached.
+- The original request containing `tlang` is intercepted locally.
+- Surge records the target language in `$persistentStore`.
+- Surge returns a local `302` to the same URL without `tlang`.
+- YouTube only receives the clean URL, so the fragile `tlang` path is avoided.
+- The response script uses the saved metadata to translate the returned XML locally.
 
-## References
+YouTube 的自动翻译字幕请求通常带有 `tlang`。在受影响环境里，只要最终打到 YouTube timedtext 后端的请求带 `tlang`，就可能 429。
 
-- YouTube Help Community: [Auto-translated subtitles issue thread](https://support.google.com/youtube/thread/368737344?sjid=5480931985540789392-NC)
-- Reddit: [Auto translated subtitles no longer work?](https://www.reddit.com/r/youtube/comments/1meu9kx/auto_translated_subtitles_no_longer_work/)
-- Reddit: [Anyone else having trouble with auto translated subtitles?](https://www.reddit.com/r/youtube/comments/1n0kvr6/anyone_else_having_trouble_with_auto_translated/)
-- Reddit: [Subtitle auto translate not showing](https://www.reddit.com/r/youtube/comments/1n2b8g1/subtitle_auto_translate_english_not_showing_in/)
-- GitHub: [ReVanced Extended issue #3147](https://github.com/inotia00/ReVanced_Extended/issues/3147)
+YT AutoTrans 的关键是：**不让带 `tlang` 的请求真正发给 YouTube**。
 
-Important outside observations:
+- 原始带 `tlang` 的请求先被 Surge 拦住。
+- Surge 把源语言和目标语言写入 `$persistentStore`。
+- Surge 本地返回 302，让 App 重新请求不带 `tlang` 的 clean URL。
+- YouTube 只看到 clean URL，因此避开 429。
+- response 脚本再按之前保存的目标语言，本地翻译 XML。
 
-- Reddit users report auto-translate failures in many regions and on iOS/desktop/browser variants.
-- ReVanced Extended issue #3147 describes `tlang` timedtext auto-translation requests returning 429 and proposes fixing Android by adding transcript cookies.
-- NodeSeek community discussion by TraderYao on YouTube "加载字幕时错误" helped confirm the China-network/dirty-exit-node angle: in that testing, clean nodes, VPS exits, or overseas SIM traffic were the reliable way to avoid the failure.
-- This repository solves the Surge/iOS proxy use case differently: it prevents YouTube from seeing `tlang` at all, while preserving `tlang` locally for response translation.
+## Why Not Pure URL Rewrite / 为什么不用纯 Rewrite
 
-## Why URL Rewrite Alone Is Not Enough
-
-A pure Surge `[URL Rewrite]` rule can remove `tlang`:
+A pure `[URL Rewrite]` can remove `tlang`:
 
 ```ini
 ^https:\/\/www\.youtube\.com\/api\/timedtext\?(.*)&tlang=[^&]+&(.*) https://www.youtube.com/api/timedtext?$1&$2 302
 ```
 
-That avoids the 429 because the second request sent to YouTube no longer contains `tlang`.
-
-However, it has a fatal product problem:
+It avoids 429, but loses the target language:
 
 ```text
 request 1: /api/timedtext?...&lang=en&tlang=ja
-Surge:    302 to /api/timedtext?...&lang=en
+rewrite:   302 to /api/timedtext?...&lang=en
 request 2: /api/timedtext?...&lang=en
-response script sees only request 2
+response:  no way to know target was ja
 ```
 
-After the 302, the response script no longer knows whether the user asked for Japanese, Chinese, Spanish, German, or any other target language. The only visible URL is the clean URL.
+That means pure rewrite can only support hard-coded translation or "translate everything" behavior. It is not suitable for a global product where the YouTube client decides the target language.
 
-That makes pure rewrite suitable only for a hard-coded target language or for "translate every subtitle" experiments. It is not suitable for a global product where the YouTube client must decide the target language.
+纯 Rewrite 可以避开 429，但会丢失 `tlang`。302 之后 response 脚本只能看到不带 `tlang` 的 clean URL，无法知道用户原本选择的是日文、中文、西语还是其他语言。因此它不适合面向全球用户。
 
-## Why Request URL Mutation Was Rejected
+## Why Not Request URL Mutation / 为什么不用 request 直接改 URL
 
-The unreliable approach is:
+Rejected approach:
 
 ```javascript
 $done({ url: cleanUrl });
 ```
 
-This asks Surge to modify the current request and continue sending it upstream. In testing, this class of request script was not reliable enough for the YouTube timedtext 429 path: logs could show a request script match while the final traffic still failed or state did not reach the response phase reliably.
+This asks Surge to modify the current request and continue sending it upstream. In testing, this path was not reliable enough for YouTube timedtext: the script could appear to match, while the final request still failed or state did not reliably reach the response phase.
 
-The current solution does not use that approach.
-
-## The Current Design
-
-The working design is:
-
-```text
-1. YouTube App requests:
-   /api/timedtext?...&lang=en&tlang=ja&format=srv3
-
-2. youtube_timedtext_request.js:
-   - reads lang=en and tlang=ja
-   - deletes tlang from a cloned URL
-   - stores metadata:
-     cleanUrl -> { sourceLang: "en", targetLang: "ja" }
-   - returns a local 302 response:
-     Location: cleanUrl
-
-3. YouTube App follows the 302:
-   /api/timedtext?...&lang=en&format=srv3
-
-4. YouTube receives only the clean URL:
-   no tlang, no 429
-
-5. youtube_timedtext_response.js:
-   - reads metadata by clean URL
-   - if no metadata exists, leaves the response untouched
-   - parses timedtext XML
-   - extracts text from srv3 `<s>` nodes
-   - translates sourceLang -> targetLang
-   - writes translated text back into each `<p>`
-```
-
-The key distinction:
+Current approach:
 
 ```javascript
-// Rejected: mutate current request and send it upstream.
-$done({ url: cleanUrl });
-
-// Current: do not send the original request upstream.
-// Return a local redirect, like a programmable rewrite.
 $done({
   response: {
     status: 302,
@@ -158,16 +176,13 @@ $done({
 });
 ```
 
-## Why This Works
+This does not send the original request upstream. It behaves like a programmable local 302 rewrite, with one extra ability: it saves `lang/tlang` before redirecting.
 
-It satisfies all required constraints:
+之前失败的是直接修改当前请求 URL 后继续发给 YouTube。现在的方案不是这样。现在 request 脚本直接返回本地 302，不把原始请求发出去；它更像“可编程 Rewrite”，但能在跳转前保存目标语言。
 
-- YouTube never sees `tlang`, so the timedtext 429 trigger is avoided.
-- The original `tlang` is preserved locally before redirect.
-- The response script only translates when matching metadata exists.
-- Ordinary subtitle requests are not translated.
-- The target language is chosen by the YouTube client, not hard-coded by the script.
-- The solution works for global users, for example:
+## Global Target Language / 全球语言支持
+
+The target language is chosen by the YouTube client:
 
 ```text
 lang=en&tlang=ja       English -> Japanese
@@ -176,41 +191,64 @@ lang=es&tlang=zh-CN    Spanish -> Chinese
 lang=fr&tlang=de       French -> German
 ```
 
-## Surge Configuration
+目标语言由 YouTube App 原始请求里的 `tlang` 决定，不在脚本里写死。因此可以服务全球用户。
 
-Do not keep old timedtext URL Rewrite rules. The request script must see `tlang`.
+## TimedText XML Handling / 字幕 XML 处理
 
-Use:
+YouTube iOS often returns srv3 XML:
 
-```ini
-[Script]
-youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/youtube_timedtext_request.js
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/youtube_timedtext_response.js
-
-[MITM]
-hostname = %APPEND% www.youtube.com
+```xml
+<p t="160" d="4560" w="1">
+  <s ac="0">Welcome</s><s t="320" ac="0"> to</s>
+</p>
 ```
 
-Remove old rules like:
+The response script:
 
-```ini
-[URL Rewrite]
-^https:\/\/www\.youtube\.com\/api\/timedtext\?tlang=[^&]+&(.*) https://www.youtube.com/api/timedtext?$1 302
-^https:\/\/www\.youtube\.com\/api\/timedtext\?(.*)&tlang=[^&]+&(.*) https://www.youtube.com/api/timedtext?$1&$2 302
-^https:\/\/www\.youtube\.com\/api\/timedtext\?(.*)&tlang=[^&]+$ https://www.youtube.com/api/timedtext?$1 302
+- preserves the surrounding timedtext XML;
+- preserves `<p>` timing attributes such as `t`, `d`, `w`, and `a`;
+- leaves empty spacer paragraphs unchanged;
+- extracts text from nested `<s>` nodes;
+- writes translated text back as a single `<s ac="0">...</s>`.
+
+响应脚本会保留 timedtext XML 骨架和 `<p>` 的时间属性，只替换可显示字幕文本。它不会强行保留原来的逐词 `<s t="...">` 分段，因为英文词级时间戳无法可靠映射到中文、日文、韩文等翻译结果。
+
+## Cache Strategy / 缓存策略
+
+YT AutoTrans uses two cache layers:
+
+1. Redirect metadata cache
+
+```text
+cleanUrl -> { sourceLang, targetLang, expiresAt }
 ```
 
-Those rewrite rules are replaced by the request script's local 302.
+This short-lived cache lets the response script recover `tlang` after the client follows the 302.
 
-## Surge CLI Verification
+2. Translation cache
 
-This project was designed and verified with help from Codex, using the local Surge CLI rather than relying on stale assumptions. The local Surge CLI manual says to use `--help` for the latest manual:
+```text
+cleanUrl + targetLang -> translated paragraph map
+```
+
+This longer-lived cache helps long videos. Surge `http-response` scripts cannot stream partial subtitle responses; they receive the complete body and call `$done(...)` once. Therefore the practical strategy is progressive caching:
+
+- use cached translations immediately;
+- translate a bounded amount per response;
+- store translated paragraphs;
+- subsequent requests for the same video and target language become more complete.
+
+YT AutoTrans 使用两层缓存：短期元数据缓存用于在 302 后恢复目标语言，长期翻译缓存用于长视频渐进补全。Surge response 脚本不能一边翻译一边分段回传，只能完整处理后一次性 `$done(...)`。
+
+## Surge CLI Verification / Surge CLI 验证
+
+This project was designed and verified with help from Codex using the local Surge CLI. We used the local manual instead of guessing:
 
 ```bash
 /Applications/Surge.app/Contents/Applications/surge-cli --help
 ```
 
-Relevant commands from the current local manual:
+Relevant local CLI entries:
 
 ```text
 dump profile [original / effective] - Show the original profile and the effective profile modified by modules
@@ -219,25 +257,16 @@ script evaluate <script-js-path> [mock-script-type] [timeout] - Load a script fr
 --check/-c <path> - Check whether a profile is valid.
 ```
 
-During development, Codex used the local CLI to:
+Development checks:
 
-- read the current command manual with `surge-cli --help`;
-- confirm module-aware profile inspection via `dump profile effective`;
-- validate the Script + MITM configuration shape with `surge-cli --check` inside a complete test profile;
-- identify request tracing with `watch request`;
-- verify script tooling availability with `script evaluate <script-js-path> [mock-script-type] [timeout]`.
+- `surge-cli --help` to confirm current CLI behavior.
+- `surge-cli --check` against a complete test profile containing the module sections.
+- `surge-cli dump profile effective` to inspect module-applied profile output.
+- `surge-cli watch request` and live logs to confirm the request chain.
+- `node --check` for JavaScript syntax.
+- Local simulation to verify clean URL metadata lookup.
 
-The important lesson was not to guess Surge behavior from memory. The working architecture came from repeatedly checking the current CLI surface, the observed live request logs, and the actual YouTube iOS timedtext traffic.
-
-Recommended checks:
-
-```bash
-/Applications/Surge.app/Contents/Applications/surge-cli --check <complete-profile-path>
-/Applications/Surge.app/Contents/Applications/surge-cli dump profile effective
-/Applications/Surge.app/Contents/Applications/surge-cli watch request
-```
-
-Note: `--check` expects a complete Surge profile. A standalone `.sgmodule` may fail with profile-level errors such as `Rules must end with FINAL` even when the module section syntax is valid. To validate module contents with CLI, place the module sections inside a minimal complete profile containing `[General]`, `[Proxy]`, and `[Rule] FINAL,DIRECT`.
+本项目由 Codex 协作完成，过程中以本机 Surge CLI 为准：用 `--help` 查看当前手册，用 `--check` 验证配置形态，用 `dump profile effective` 查看模块生效后的 profile，用 `watch request` 和实际日志验证链路。
 
 Expected logs:
 
@@ -254,118 +283,80 @@ Final upstream YouTube request does not contain: tlang
 Upstream timedtext response is: 200 OK
 ```
 
-## TimedText XML Handling
+Note: `--check` expects a complete Surge profile. A standalone `.sgmodule` may fail with profile-level errors such as `Rules must end with FINAL`. To validate module contents with CLI, place the module sections inside a minimal complete profile containing `[General]`, `[Proxy]`, and `[Rule] FINAL,DIRECT`.
 
-YouTube iOS often returns srv3 XML:
+## FAQ
 
-```xml
-<p t="160" d="4560" w="1">
-  <s ac="0">Welcome</s><s t="320" ac="0"> to</s>
-</p>
-```
+### Do I need MITM for `translate.googleapis.com`?
 
-The response script:
+No. MITM is only needed for `www.youtube.com`, because Surge must inspect and modify the YouTube App's timedtext request and response.
 
-- preserves the surrounding timedtext XML;
-- preserves `<p>` timing attributes such as `t`, `d`, `w`, and `a`;
-- leaves empty spacer paragraphs unchanged;
-- extracts text from all nested `<s>` nodes;
-- writes the translated line back as a single `<s ac="0">...</s>`.
+`translate.googleapis.com` is requested by Surge's script through `$httpClient.get`. We do not need to decrypt app traffic for that host, and we do not rewrite its response body.
 
-Example output:
+### 需要给 `translate.googleapis.com` 加 MITM 吗？
 
-```xml
-<p t="160" d="4560" w="1"><s ac="0">ようこそ...</s></p>
-```
+不需要。MITM 只需要 `www.youtube.com`。因为我们要拦截的是 YouTube App 的 timedtext 请求和响应。
 
-The script intentionally does not preserve every original `<s t="...">` word segment. Word-level timing from English does not map cleanly to Chinese, Japanese, Korean, or other translated text. Keeping paragraph timing is much safer for app compatibility.
+`translate.googleapis.com` 是脚本内部 `$httpClient.get` 主动请求的接口，不是 App 发出的需要解密的流量，也不需要改它的 response body。
 
-## Caching Strategy
+### Can this coexist with other rewrite modules?
 
-There are two cache layers:
+Yes, but do not keep any rule that rewrites `/api/timedtext?...tlang=...` before YT AutoTrans sees it. If another module deletes `tlang` first, YT AutoTrans cannot know the requested target language.
 
-### 1. Redirect metadata cache
+### 可以和其他 Rewrite 模块共存吗？
 
-Written by `youtube_timedtext_request.js`:
+可以，但不能保留提前删除 `/api/timedtext` 里 `tlang` 的规则。否则 YT AutoTrans 看不到目标语言。
 
-```text
-cleanUrl -> { sourceLang, targetLang, expiresAt }
-```
+## Relationship To DualSubs / 与 DualSubs 的关系
 
-This cache is short-lived. It exists so the response script can recover the target language after the client follows the 302.
+This project partially references and learns from the now-broken DualSubs approach and NodeSeek community troubleshooting around YouTube "加载字幕时错误".
 
-### 2. Translation cache
+DualSubs inspired:
 
-Written by `youtube_timedtext_response.js`:
+- language-state caching;
+- `tlang` handling;
+- mode/type thinking;
+- YouTube caption metadata investigation.
+
+But YT AutoTrans solves a narrower Surge/iOS problem:
 
 ```text
-cleanUrl + targetLang -> translated paragraph map
+Only /api/timedtext XML response translation.
 ```
 
-This cache lasts longer and allows progressive improvement for long videos. A single response script cannot stream partial subtitles to the app; Surge response scripting loads the complete body and returns it once. Therefore the practical strategy is:
+DualSubs primarily worked around caption tracklist/player-response behavior. YT AutoTrans works directly on timedtext XML after obtaining a clean upstream response.
 
-- use cached translations immediately;
-- translate a bounded amount per response;
-- store translated paragraphs;
-- subsequent requests for the same video and target language become more complete.
+本项目参考了已经失效的 DualSubs 思路，也参考了 NodeSeek 关于 YouTube “加载字幕时错误”的社区排查。DualSubs 主要处理字幕轨道列表和 player response；YT AutoTrans 更窄，只处理 Surge/iOS 场景下 `/api/timedtext` XML 的本地翻译。
 
-This avoids blocking the YouTube App for too long on very long subtitle files.
+## Acknowledgements / 致谢
 
-## Why Not Stream Partial Subtitles?
+- DualSubs, for earlier exploration of YouTube captions, `tlang`, subtitle modes, and language-state caching.
+- NodeSeek community discussion by TraderYao, for documenting the YouTube "加载字幕时错误" troubleshooting path and the observation that clean VPS exits or overseas SIM traffic can avoid the China-environment failure.
+- Reddit, YouTube Help Community, and ReVanced Extended reports, for showing this is a broader long-running auto-translate subtitle reliability issue rather than a single-user misconfiguration.
+- Codex, for implementation assistance, Surge CLI based verification, README drafting, and iterative debugging with live traffic logs.
 
-Surge `http-response` scripts with `requires-body=true` operate on a completed response body. The script must call `$done(...)` once with the final body or with `{}` to leave it untouched.
+## References / 参考
 
-That means this is not possible:
+- YouTube Help Community: [Auto-translated subtitles issue thread](https://support.google.com/youtube/thread/368737344?sjid=5480931985540789392-NC)
+- Reddit: [Auto translated subtitles no longer work?](https://www.reddit.com/r/youtube/comments/1meu9kx/auto_translated_subtitles_no_longer_work/)
+- Reddit: [Anyone else having trouble with auto translated subtitles?](https://www.reddit.com/r/youtube/comments/1n0kvr6/anyone_else_having_trouble_with_auto_translated/)
+- Reddit: [Subtitle auto translate not showing](https://www.reddit.com/r/youtube/comments/1n2b8g1/subtitle_auto_translate_english_not_showing_in/)
+- GitHub: [ReVanced Extended issue #3147](https://github.com/inotia00/ReVanced_Extended/issues/3147)
 
-```text
-translate first 20 lines -> send them to YouTube App
-translate next 20 lines -> append later
-...
-```
-
-The closest practical equivalent is progressive caching across repeated timedtext requests.
-
-## Relationship To DualSubs
-
-This project partially references and learns from the now-broken DualSubs approach and from NodeSeek community troubleshooting around YouTube "加载字幕时错误".
-
-DualSubs inspired parts of the investigation, especially:
-
-- caching language state;
-- handling `tlang`;
-- using a mode/type concept;
-- modifying YouTube caption metadata in other endpoints.
-
-But this project solves a narrower problem:
-
-```text
-Only /api/timedtext XML response translation for Surge/iOS.
-```
-
-DualSubs primarily works at the captions tracklist/player-response layer. This repository works directly on the timedtext XML body after obtaining a clean upstream response.
-
-NodeSeek/TraderYao's testing helped frame the network-side diagnosis: in China-facing proxy environments, the problem is not only an XML parsing problem or a YouTube App UI problem. It is often tied to whether the final timedtext auto-translation request exits from a clean enough network path. This repository avoids sending the fragile `tlang` request upstream, so it can work even when changing to a clean node is inconvenient.
-
-## Acknowledgements
-
-- DualSubs, for its earlier exploration of YouTube captions, `tlang`, subtitle modes, and language-state caching.
-- NodeSeek community discussion by TraderYao, for documenting the YouTube "加载字幕时错误" troubleshooting path and the observation that clean VPS exits or overseas SIM traffic can avoid the China-environment 429 failure.
-- Reddit, YouTube Help Community, and ReVanced Extended reports, for showing this is a broader, long-running auto-translate subtitle reliability issue rather than a single-user misconfiguration.
-
-## Known Limits
+## Known Limits / 已知限制
 
 - Translation quality depends on Google Translate's unofficial endpoint.
 - If Google Translate rate-limits or fails, untranslated lines are left as original text.
-- If YouTube changes timedtext XML format, the XML parser logic may need updates.
+- If YouTube changes timedtext XML format, parser logic may need updates.
 - If another module rewrites `/api/timedtext` before this request script sees `tlang`, target-language recovery will fail.
 - MITM must be enabled for `www.youtube.com`.
 
-## Current Status
+## Status / 状态
 
 Verified:
 
 - local script syntax checks pass;
-- Surge `--check` accepts the Script + MITM configuration shape;
+- Surge `--check` accepts the Script + MITM configuration shape inside a complete test profile;
 - request script produces a clean `302 Location` without `tlang`;
 - response script can recover cached target language and write translated timedtext XML;
 - live user testing confirmed subtitles load successfully.
