@@ -1,4 +1,4 @@
-# YT AutoTrans
+# YT AutoTrans Error
 
 ![Surge](https://img.shields.io/badge/Surge-iOS%20%2F%20Mac-18A0FB)
 ![YouTube](https://img.shields.io/badge/YouTube-TimedText-FF0000)
@@ -6,13 +6,17 @@
 ![Status](https://img.shields.io/badge/Status-Verified-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-**YT AutoTrans** is a Surge module that fixes the long-running YouTube auto-translated subtitle failure where `/api/timedtext` requests with `tlang` return HTTP 429 or the YouTube app shows "error loading subtitles".
+**YT AutoTrans Error** is a Surge module for iPhone / iPad users who watch YouTube in the native YouTube app and hit the long-running auto-translated subtitle failure where `/api/timedtext` requests with `tlang` return HTTP 429 or the app shows "error loading subtitles".
 
-**YT AutoTrans** 是一个 Surge 模块，用于修复 YouTube 自动翻译字幕长期反复出现的失败问题：当 YouTube App 请求 `/api/timedtext?...&tlang=...` 时，接口可能返回 HTTP 429，或者 App 显示“加载字幕时错误”。
+**YT AutoTrans Error** 是一个面向 iPhone / iPad 用户的 Surge 模块，主要修复原生 YouTube App 自动翻译字幕长期反复出现的失败问题：当 YouTube App 请求 `/api/timedtext?...&tlang=...` 时，接口可能返回 HTTP 429，或者 App 显示“加载字幕时错误”。
 
 This repository targets an issue repeatedly reported by global users across YouTube Help Community, Reddit, ReVanced Extended, NodeSeek, and other communities. The issue has appeared fixed, partially fixed, platform-specific, or network-specific at different times, but it continues to recur in real-world use. It is especially easy to reproduce in China-mainland-facing proxy/airport environments with unclean exit IPs.
 
 本仓库解决的是一个被全球用户反复报告、长期未彻底消失的问题。它在 YouTube Help Community、Reddit、ReVanced Extended、NodeSeek 等社区都有讨论；有时看似被 Google/YouTube 修复，有时只在部分平台恢复，但实际仍会复现。尤其在中国大陆相关代理/机场环境、出口 IP 不够干净时更容易触发。
+
+Desktop browsers are not the main target. On desktop, tools such as Immersive Translate can already solve many subtitle translation needs. This project exists for the Apple mobile ecosystem, where the native YouTube app cannot be fixed with normal browser extensions.
+
+桌面浏览器不是本项目的主要目标。电脑用户通常可以直接使用沉浸式翻译等扩展解决字幕翻译需求。本项目主要解决苹果移动生态里 iPhone / iPad 原生 YouTube App 无法通过浏览器扩展介入的问题。
 
 ## Install / 安装
 
@@ -25,7 +29,7 @@ https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/yt-autotrans
 Module content:
 
 ```ini
-#!name=YT AutoTrans
+#!name=YT AutoTrans Error
 #!desc=Fix YouTube timedtext auto-translation 429 on Surge.
 #!system=ios
 
@@ -286,6 +290,14 @@ Upstream timedtext response is: 200 OK
 Note: `--check` expects a complete Surge profile. A standalone `.sgmodule` may fail with profile-level errors such as `Rules must end with FINAL`. To validate module contents with CLI, place the module sections inside a minimal complete profile containing `[General]`, `[Proxy]`, and `[Rule] FINAL,DIRECT`.
 
 ## FAQ
+
+### Is this for desktop users?
+
+Not primarily. Desktop browser users can often use Immersive Translate or similar extensions. YT AutoTrans Error focuses on the native YouTube iOS app, where browser extensions cannot intercept and repair the subtitle request pipeline.
+
+### 这是给电脑用户用的吗？
+
+不是主要目标。电脑浏览器用户通常可以使用沉浸式翻译等扩展。YT AutoTrans Error 主要面向 iPhone / iPad 原生 YouTube App，因为原生 App 的字幕请求链路无法用普通浏览器扩展修复。
 
 ### Do I need MITM for `translate.googleapis.com`?
 
