@@ -11,6 +11,27 @@ The current solution has been verified with YouTube iOS timedtext traffic:
 - the response script translates the timedtext XML locally to the original `tlang`;
 - ordinary subtitle requests without `tlang` are left untouched.
 
+## Install As A Surge Module
+
+Recommended module URL:
+
+```text
+https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/youtube-timedtext-translate.sgmodule
+```
+
+The module contains:
+
+```ini
+[Script]
+youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-path=https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/youtube_timedtext_request.js
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?,requires-body=true,max-size=2097152,timeout=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/youtube-timedtext-surge-scripts/main/youtube_timedtext_response.js
+
+[MITM]
+hostname = %APPEND% www.youtube.com
+```
+
+Do not keep old timedtext rewrite rules in another module or profile section. This module must see the original `tlang` request before it is redirected.
+
 ## Background
 
 YouTube's subtitle auto-translate path commonly requests:
@@ -172,7 +193,7 @@ Those rewrite rules are replaced by the request script's local 302.
 
 ## Surge CLI Verification
 
-The local Surge CLI manual says to use `--help` for the latest manual:
+This project was designed and verified with help from Codex, using the local Surge CLI rather than relying on stale assumptions. The local Surge CLI manual says to use `--help` for the latest manual:
 
 ```bash
 /Applications/Surge.app/Contents/Applications/surge-cli --help
@@ -187,13 +208,25 @@ script evaluate <script-js-path> [mock-script-type] [timeout] - Load a script fr
 --check/-c <path> - Check whether a profile is valid.
 ```
 
+During development, Codex used the local CLI to:
+
+- read the current command manual with `surge-cli --help`;
+- confirm module-aware profile inspection via `dump profile effective`;
+- validate the Script + MITM configuration shape with `surge-cli --check` inside a complete test profile;
+- identify request tracing with `watch request`;
+- verify script tooling availability with `script evaluate <script-js-path> [mock-script-type] [timeout]`.
+
+The important lesson was not to guess Surge behavior from memory. The working architecture came from repeatedly checking the current CLI surface, the observed live request logs, and the actual YouTube iOS timedtext traffic.
+
 Recommended checks:
 
 ```bash
-/Applications/Surge.app/Contents/Applications/surge-cli --check <profile-or-module-path>
+/Applications/Surge.app/Contents/Applications/surge-cli --check <complete-profile-path>
 /Applications/Surge.app/Contents/Applications/surge-cli dump profile effective
 /Applications/Surge.app/Contents/Applications/surge-cli watch request
 ```
+
+Note: `--check` expects a complete Surge profile. A standalone `.sgmodule` may fail with profile-level errors such as `Rules must end with FINAL` even when the module section syntax is valid. To validate module contents with CLI, place the module sections inside a minimal complete profile containing `[General]`, `[Proxy]`, and `[Rule] FINAL,DIRECT`.
 
 Expected logs:
 
