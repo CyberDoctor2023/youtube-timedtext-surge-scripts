@@ -1,7 +1,6 @@
-const url = $request.url;
 let body = $response.body || "";
 
-const TARGET_LANG = "zh-CN"; // 先固定简体中文，跑通后再做繁中/其他语言
+const TARGET_LANG = "zh-CN";
 const BATCH_SIZE = 5;
 const SPLIT_MARK = "\n<<<YT_SPLIT_SAFE_2026>>>\n";
 
@@ -69,7 +68,7 @@ function makeMessageBody(message) {
 function extractText(content) {
   content = String(content || "");
 
-  // 兼容 Gemini / ASR 的逐词结构：<p><s>word</s><s>word</s></p>
+  // 兼容 Gemini / ASR 逐词字幕：<p><s>word</s><s>word</s></p>
   if (/<s\b[^>]*>[\s\S]*?<\/s>/.test(content)) {
     let words = [];
 
@@ -81,14 +80,14 @@ function extractText(content) {
     return words.join(" ").replace(/\s+/g, " ").trim();
   }
 
-  // 普通结构：<p t="..." d="...">text</p>
+  // 普通字幕：<p t="..." d="...">text</p>
   return decodeXml(content)
     .replace(/<[^>]+>/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function googleTranslateOne(text, targetLang, callback) {
+function googleTranslateOne(text, callback) {
   if (!text) {
     callback("【空字幕】");
     return;
@@ -98,7 +97,7 @@ function googleTranslateOne(text, targetLang, callback) {
     "https://translate.googleapis.com/translate_a/single" +
     "?client=gtx" +
     "&sl=auto" +
-    "&tl=" + encodeURIComponent(targetLang) +
+    "&tl=" + encodeURIComponent(TARGET_LANG) +
     "&dt=t" +
     "&q=" + encodeURIComponent(text);
 
@@ -127,14 +126,14 @@ function googleTranslateOne(text, targetLang, callback) {
   });
 }
 
-function googleTranslateBatch(texts, targetLang, callback) {
+function googleTranslateBatch(texts, callback) {
   const joined = texts.join(SPLIT_MARK);
 
   const api =
     "https://translate.googleapis.com/translate_a/single" +
     "?client=gtx" +
     "&sl=auto" +
-    "&tl=" + encodeURIComponent(targetLang) +
+    "&tl=" + encodeURIComponent(TARGET_LANG) +
     "&dt=t" +
     "&q=" + encodeURIComponent(joined);
 
@@ -172,7 +171,7 @@ function googleTranslateBatch(texts, targetLang, callback) {
   });
 }
 
-function translateAll(texts, targetLang, callback) {
+function translateAll(texts, callback) {
   let results = new Array(texts.length);
   let index = 0;
 
@@ -185,7 +184,7 @@ function translateAll(texts, targetLang, callback) {
     const start = index;
     const batch = texts.slice(start, start + BATCH_SIZE);
 
-    googleTranslateBatch(batch, targetLang, function (batchResult) {
+    googleTranslateBatch(batch, function (batchResult) {
       // 批量失败时，降级逐条翻译
       if (!batchResult) {
         let local = new Array(batch.length);
@@ -202,7 +201,7 @@ function translateAll(texts, targetLang, callback) {
             return;
           }
 
-          googleTranslateOne(batch[j], targetLang, function (oneResult) {
+          googleTranslateOne(batch[j], function (oneResult) {
             local[j] = oneResult || "【翻译失败：单条未生成】";
             j++;
             nextOne();
@@ -232,7 +231,7 @@ if (!isTimedText(body)) {
 
   $done({
     status: 200,
-    headers: makeHeaders($response.headers, msgBody, "STATELESS_NOT_TIMEDTEXT"),
+    headers: makeHeaders($response.headers, msgBody, "DEFAULT_ZH_NOT_TIMEDTEXT"),
     body: msgBody
   });
 
@@ -252,7 +251,7 @@ if (!matches.length) {
 
   $done({
     status: 200,
-    headers: makeHeaders($response.headers, msgBody, "STATELESS_NO_P_NODES"),
+    headers: makeHeaders($response.headers, msgBody, "DEFAULT_ZH_NO_P_NODES"),
     body: msgBody
   });
 
@@ -277,7 +276,7 @@ if (!items.length) {
 
   $done({
     status: 200,
-    headers: makeHeaders($response.headers, msgBody, "STATELESS_EMPTY_TEXT"),
+    headers: makeHeaders($response.headers, msgBody, "DEFAULT_ZH_EMPTY_TEXT"),
     body: msgBody
   });
 
@@ -288,7 +287,7 @@ const originals = items.map(function (x) {
   return x.text;
 });
 
-translateAll(originals, TARGET_LANG, function (translatedTexts) {
+translateAll(originals, function (translatedTexts) {
   const translatedByPIndex = {};
 
   for (let i = 0; i < items.length; i++) {
@@ -315,7 +314,7 @@ translateAll(originals, TARGET_LANG, function (translatedTexts) {
   });
 
   const debug =
-    "STATELESS_OK" +
+    "DEFAULT_ZH_OK" +
     ";target=" + TARGET_LANG +
     ";count=" + items.length +
     ";replaced=" + replaced;
