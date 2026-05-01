@@ -2,7 +2,7 @@ const REQUEST_TIMEOUT = 3;
 const RESPONSE_DEADLINE_MS = 7500;
 const MAX_URL_LENGTH = 5000;
 const MAX_CHUNKS_PER_RESPONSE = 24;
-const MAX_PARALLEL_REQUESTS = 12;
+const MAX_PARALLEL_REQUESTS = 4;
 const MAX_SELF_RELOADS = 1;
 const RELOAD_TTL_MS = 60 * 1000;
 const MAX_SEGMENT_WIDTH = 92;
@@ -13,7 +13,7 @@ const SHORT_CONTEXT_WORDS = 16;
 const SHORT_TOKEN_LIMIT = 2;
 const SHORT_DISPLAY_WIDTH = 14;
 const SHORT_DURATION_MS = 1200;
-const CACHE_VERSION = 16;
+const CACHE_VERSION = 17;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
@@ -714,7 +714,19 @@ function countUntranslatedItems(items) {
   let count = 0;
 
   for (let index = 0; index < items.length; index += 1) {
-    if (items[index].text && !items[index].translated) {
+    if (items[index].text && (!items[index].translated || items[index].diagnostic)) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function countCachedItems(items) {
+  let count = 0;
+
+  for (let index = 0; index < items.length; index += 1) {
+    if (items[index].text && items[index].translated && !items[index].diagnostic) {
       count += 1;
     }
   }
@@ -752,7 +764,7 @@ function selfReload(cache, cacheStateKey, reloadStateKey) {
   });
 }
 
-function finish(items, translatedCount, cache, key, reloadStateKey, options, useAsrLayout, status) {
+function finish(items, translatedCount, cache, key, reloadStateKey, options, useAsrLayout, status, stats) {
   let index = 0;
   const replacements = {};
 
@@ -796,10 +808,16 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
   writeJson(key, cache);
   normalizeHeaders();
   headers["X-YT-AutoTrans"] =
-    "translated=" +
-    translatedCount +
-    "/" +
+    "items=" +
     items.length +
+    ";cached=" +
+    countCachedItems(items) +
+    ";requested=" +
+    (stats ? stats.requested : 0) +
+    ";ok=" +
+    translatedCount +
+    ";fail=" +
+    (stats ? stats.failed : 0) +
     ";missing=" +
     countUntranslatedItems(items) +
     (status ? ";status=" + status : "");
@@ -870,7 +888,10 @@ if (!meta) {
   }
 
   if (items.length === 0) {
-    finish(items, 0, cache, key, reloadStateKey, options, useAsrLayout);
+    finish(items, 0, cache, key, reloadStateKey, options, useAsrLayout, "", {
+      requested: 0,
+      failed: 0
+    });
   } else {
     const chunks = buildChunks(items);
     let completedCount = 0;
@@ -892,7 +913,10 @@ if (!meta) {
         markTranslateTimeoutTrack(items);
       }
 
-      finish(items, translatedCount, cache, key, reloadStateKey, options, useAsrLayout, status);
+      finish(items, translatedCount, cache, key, reloadStateKey, options, useAsrLayout, status, {
+        requested: completedCount,
+        failed: failedCount
+      });
     }
 
     function completeOne(translatedText) {
@@ -939,7 +963,10 @@ if (!meta) {
     }
 
     if (chunks.length === 0) {
-      finish(items, translatedCount, cache, key, reloadStateKey, options, useAsrLayout);
+      finish(items, translatedCount, cache, key, reloadStateKey, options, useAsrLayout, "", {
+        requested: 0,
+        failed: 0
+      });
     } else {
       setTimeout(function () {
         complete("translate timeout");

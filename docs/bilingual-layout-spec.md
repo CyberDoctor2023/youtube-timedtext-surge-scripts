@@ -35,6 +35,7 @@ Add optional bilingual timedtext output for YT AutoTrans Error, keep it usable b
 - Response script uses a foreground-response deadline strategy: Google Translate requests time out quickly, beta5 raises chunk throughput and translates the next uncached chunks in timeline order, so repeated timedtext requests caused by seeking can progressively fill the cache instead of reshuffling gaps.
 - Beta6 can simulate one subtitle reload at the HTTP layer: after a successful partial translation pass, it stores the cache and returns a single 302 to the same clean timedtext URL, causing YouTube to request the subtitle track again without requiring the user to toggle CC.
 - Beta7 normalizes timedtext URLs for meta/cache/reload keys and adds an `X-YT-AutoTrans` response header so mobile Surge captures can show translated and missing cue counts directly.
+- Beta8 lowers Google Translate concurrency to reduce full-batch failures and expands diagnostics to include items, cached, requested, ok, fail, missing, and status.
 - Remote script URLs are versioned so module updates can force a fresh external script resource URL.
 - The install URL points to the GitHub Release `.sgmodule` asset, and the visible module `version` argument matches the release/tag rather than a self-referential commit hash.
 - README documents current features and design tradeoffs without a long commit-by-commit history.
