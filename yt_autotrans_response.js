@@ -919,16 +919,18 @@ function markTranslateTimeoutTrack(items) {
   return count;
 }
 
-function markFirstDiagnosticCue(items, text) {
+function markDiagnosticTrack(items, text) {
+  let count = 0;
+
   for (let index = 0; index < items.length; index += 1) {
     if (items[index].text) {
       items[index].translated = text;
       items[index].diagnostic = true;
-      return 1;
+      count += 1;
     }
   }
 
-  return 0;
+  return count;
 }
 
 function countUntranslatedItems(items) {
@@ -1070,6 +1072,7 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
 }
 
 function finishDiagnostic(status, text) {
+  let count = 0;
   let replaced = false;
 
   if (isAutomaticCaption(body, $request.url)) {
@@ -1077,11 +1080,12 @@ function finishDiagnostic(status, text) {
   }
 
   body = body.replace(pRegex, function (match, attrs, content) {
-    if (replaced || isSpacerParagraph(attrs, content)) {
+    if (isSpacerParagraph(attrs, content)) {
       return match;
     }
 
     replaced = true;
+    count += 1;
     return "<p" + attrs + "><s ac=\"0\">" + encodeSubtitleText(text) + "</s></p>";
   });
 
@@ -1096,7 +1100,7 @@ function finishDiagnostic(status, text) {
   headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
   headers.Pragma = "no-cache";
   headers.Expires = "0";
-  headers["X-YT-AutoTrans"] = status + ";diagnostic=body";
+  headers["X-YT-AutoTrans"] = status + ";diagnostic=all-cues;diagnosticItems=" + count;
 
   $done({
     body: body,
@@ -1190,8 +1194,8 @@ if (!meta) {
 
       if (translatedCount === 0 && status) {
         if (plan.longTrack) {
-          markFirstDiagnosticCue(items, TRANSLATE_FAILED_TEXT);
-          status = status + ";diagnostic=first-cue";
+          markDiagnosticTrack(items, TRANSLATE_FAILED_TEXT);
+          status = status + ";diagnostic=all-cues";
         } else {
           markTranslateTimeoutTrack(items);
         }
