@@ -1,14 +1,14 @@
 #!name=🧪 YT AutoTrans Error Beta
-#!desc=测试 no-meta 可见诊断和 POST 内部 fallback / Test visible no-meta diagnostics and POST fallback.
+#!desc=测试翻译全失败可见诊断 / Test visible diagnostics when translation fully fails.
 #!system=ios
 #!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
-#!version=beta17
-#!arguments=mode:dual,version:beta17
-#!arguments-desc=[版本 / Version]\n\nversion=beta17：no-meta 时把调试信息写进字幕 body，便于判断 request/meta 链路；保留 beta16 的 POST 内部拆分 fallback；脚本不会读取这个参数 / Writes visible subtitle diagnostics on no-meta and keeps beta16 POST split fallback. Scripts do not read this parameter.\n\n[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
+#!version=beta18
+#!arguments=mode:dual,version:beta18
+#!arguments-desc=[版本 / Version]\n\nversion=beta18：长视频翻译全失败时，不再静默返回英文，而是在第一条字幕写入调试信息；保留 no-meta 可见诊断和 POST 内部拆分 fallback；脚本不会读取这个参数 / Writes a first-cue diagnostic when long-track translation fully fails, while keeping no-meta diagnostics and POST split fallback. Scripts do not read this parameter.\n\n[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.
 
 [Script]
-youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/beta/yt_autotrans_request.js?v=beta17
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext,requires-body=true,max-size=10485760,timeout=60,script-update-interval=60,argument=mode={{{mode}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/beta/yt_autotrans_response.js?v=beta17
+youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/beta/yt_autotrans_request.js?v=beta18
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext,requires-body=true,max-size=10485760,timeout=60,script-update-interval=60,argument=mode={{{mode}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/beta/yt_autotrans_response.js?v=beta18
 
 [MITM]
 hostname = %APPEND% www.youtube.com

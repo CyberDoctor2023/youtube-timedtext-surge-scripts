@@ -30,6 +30,7 @@ const DEFAULT_OPTIONS = {
 };
 const TRANSLATE_TIMEOUT_TEXT = "[YT AutoTrans] Google 翻译服务超时，请检查节点或稍后重试。";
 const NO_META_TEXT = "[YT AutoTrans] skipped=no-meta\n响应脚本已命中，但没有找到 tlang 元数据。\n请检查本次请求前是否有 youtube-timedtext-request 302。";
+const TRANSLATE_FAILED_TEXT = "[YT AutoTrans] translate failed\n已拿到 tlang 元数据，但 POST 和 fallback GET 没有拿到有效译文。\n请检查 translate.googleapis.com 请求是否 timeout / 429 / blocked。";
 
 let body = $response.body || "";
 let headers = Object.assign({}, $response.headers || {});
@@ -918,6 +919,18 @@ function markTranslateTimeoutTrack(items) {
   return count;
 }
 
+function markFirstDiagnosticCue(items, text) {
+  for (let index = 0; index < items.length; index += 1) {
+    if (items[index].text) {
+      items[index].translated = text;
+      items[index].diagnostic = true;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
 function countUntranslatedItems(items) {
   let count = 0;
 
@@ -1177,7 +1190,8 @@ if (!meta) {
 
       if (translatedCount === 0 && status) {
         if (plan.longTrack) {
-          status = status + ";fast-return";
+          markFirstDiagnosticCue(items, TRANSLATE_FAILED_TEXT);
+          status = status + ";diagnostic=first-cue";
         } else {
           markTranslateTimeoutTrack(items);
         }
