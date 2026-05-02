@@ -29,6 +29,7 @@ const DEFAULT_OPTIONS = {
   position: "Forward"
 };
 const TRANSLATE_TIMEOUT_TEXT = "[YT AutoTrans] Google 翻译服务超时，请检查节点或稍后重试。";
+const NO_META_TEXT = "[YT AutoTrans] skipped=no-meta\n响应脚本已命中，但没有找到 tlang 元数据。\n请检查本次请求前是否有 youtube-timedtext-request 302。";
 
 let body = $response.body || "";
 let headers = Object.assign({}, $response.headers || {});
@@ -1055,16 +1056,48 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
   });
 }
 
+function finishDiagnostic(status, text) {
+  let replaced = false;
+
+  if (isAutomaticCaption(body, $request.url)) {
+    body = normalizeTimedtextLayout(body);
+  }
+
+  body = body.replace(pRegex, function (match, attrs, content) {
+    if (replaced || isSpacerParagraph(attrs, content)) {
+      return match;
+    }
+
+    replaced = true;
+    return "<p" + attrs + "><s ac=\"0\">" + encodeSubtitleText(text) + "</s></p>";
+  });
+
+  if (!replaced) {
+    body = body.replace(
+      /<\/body>/,
+      "<p t=\"0\" d=\"4000\"><s ac=\"0\">" + encodeSubtitleText(text) + "</s></p></body>"
+    );
+  }
+
+  normalizeHeaders();
+  headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+  headers.Pragma = "no-cache";
+  headers.Expires = "0";
+  headers["X-YT-AutoTrans"] = status + ";diagnostic=body";
+
+  $done({
+    body: body,
+    headers: headers
+  });
+}
+
 const options = parseArguments();
 const metaState = getMetaState();
 const meta = metaState ? metaState.meta : null;
 
 if (!meta) {
   console.log("YouTube timedtext skipped: no target language metadata");
-  headers["X-YT-AutoTrans"] = "skipped=no-meta";
-  $done({
-    headers: headers
-  });
+  finishDiagnostic("skipped=no-meta", NO_META_TEXT);
 } else if (
   meta.sourceLang &&
   meta.targetLang &&
