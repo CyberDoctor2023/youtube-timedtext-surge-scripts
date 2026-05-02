@@ -1,11 +1,13 @@
 const REQUEST_TIMEOUT = 3;
 const RESPONSE_DEADLINE_MS = 7500;
 const LONG_TRACK_DEADLINE_MS = 6500;
-const MAX_URL_LENGTH = 5000;
+const MAX_TRANSLATE_GET_LENGTH = 5000;
+const MAX_TRANSLATE_BODY_LENGTH = 24000;
+const MAX_LONG_TRACK_TRANSLATE_BODY_LENGTH = 32000;
 const MAX_CHUNKS_PER_RESPONSE = 24;
 const MAX_LONG_TRACK_CHUNKS = 24;
 const MAX_PARALLEL_REQUESTS = 4;
-const MAX_LONG_TRACK_PARALLEL_REQUESTS = 4;
+const MAX_LONG_TRACK_PARALLEL_REQUESTS = 8;
 const MAX_SELF_RELOADS = 3;
 const RELOAD_TTL_MS = 60 * 1000;
 const LONG_TRACK_BODY_LENGTH = 240000;
@@ -47,22 +49,6 @@ function hashString(text) {
 
 function metaKey(cleanUrl) {
   return "yt_tt_meta_" + hashString(cleanUrl);
-}
-
-function trackMetaKey(urlString) {
-  try {
-    const url = new URL(urlString);
-    const keys = ["v", "lang", "kind", "variant", "format"];
-    const parts = [url.origin, url.pathname];
-
-    for (let index = 0; index < keys.length; index += 1) {
-      parts.push(keys[index] + "=" + (url.searchParams.get(keys[index]) || ""));
-    }
-
-    return "yt_tt_track_" + hashString(parts.join("|"));
-  } catch (error) {
-    return "yt_tt_track_" + hashString(urlString);
-  }
 }
 
 function cacheKey(cleanUrl, targetLang) {
@@ -184,17 +170,37 @@ function writeJson(key, value) {
   $persistentStore.write(JSON.stringify(value), key);
 }
 
-function getMeta() {
-  const meta =
-    readJson(metaKey($request.url)) ||
-    readJson(metaKey(canonicalTimedtextUrl($request.url))) ||
-    readJson(trackMetaKey($request.url));
+function clearStoreKey(key) {
+  if (key) {
+    $persistentStore.write("", key);
+  }
+}
+
+function getMetaState() {
+  const exactKey = metaKey($request.url);
+  const canonicalKey = metaKey(canonicalTimedtextUrl($request.url));
+  const exactMeta = readJson(exactKey);
+  const canonicalMeta = exactKey === canonicalKey ? null : readJson(canonicalKey);
+  const meta = exactMeta || canonicalMeta;
 
   if (!meta || !meta.targetLang || !meta.expiresAt || Date.now() > meta.expiresAt) {
     return null;
   }
 
-  return meta;
+  return {
+    meta: meta,
+    keys: exactKey === canonicalKey ? [exactKey] : [exactKey, canonicalKey]
+  };
+}
+
+function consumeMeta(metaState) {
+  if (!metaState || !metaState.keys) {
+    return;
+  }
+
+  for (let index = 0; index < metaState.keys.length; index += 1) {
+    clearStoreKey(metaState.keys[index]);
+  }
 }
 
 function getTranslationCache(key) {
@@ -248,6 +254,16 @@ function decodeXml(text) {
     .replace(/&amp;/g, "&");
 }
 
+function cleanSpeakerMarkers(text) {
+  return String(text || "")
+    .split("\n")
+    .map(function (line) {
+      return line.replace(/^\s*(?:(?:>>|<<|＞＞|＜＜|》》|《《)\s*)+/, "");
+    })
+    .join("\n")
+    .trim();
+}
+
 function encodeXml(text) {
   return String(text || "")
     .replace(/&/g, "&amp;")
@@ -277,10 +293,10 @@ function extractText(content) {
   }
 
   if (text.trim()) {
-    return text.trim();
+    return cleanSpeakerMarkers(text.trim());
   }
 
-  return decodeXml(String(content || "").replace(/<[^>]+>/g, "")).trim();
+  return cleanSpeakerMarkers(decodeXml(String(content || "").replace(/<[^>]+>/g, "")).trim());
 }
 
 function parseAttrs(attrs) {
@@ -580,6 +596,9 @@ function addShortCueContext(items) {
 }
 
 function makeSubtitleText(sourceText, translatedText, options) {
+  sourceText = cleanSpeakerMarkers(sourceText);
+  translatedText = cleanSpeakerMarkers(translatedText);
+
   if (options.showOnly) {
     return translatedText;
   }
@@ -622,6 +641,7 @@ function makePlan(items, input) {
       deadlineMs: RESPONSE_DEADLINE_MS,
       maxChunks: MAX_CHUNKS_PER_RESPONSE,
       maxParallelRequests: MAX_PARALLEL_REQUESTS,
+      maxTranslateBodyLength: MAX_TRANSLATE_BODY_LENGTH,
       allowSelfReload: true
     };
   }
@@ -631,6 +651,7 @@ function makePlan(items, input) {
     deadlineMs: LONG_TRACK_DEADLINE_MS,
     maxChunks: MAX_LONG_TRACK_CHUNKS,
     maxParallelRequests: MAX_LONG_TRACK_PARALLEL_REQUESTS,
+    maxTranslateBodyLength: MAX_LONG_TRACK_TRANSLATE_BODY_LENGTH,
     allowSelfReload: false
   };
 }
@@ -652,7 +673,20 @@ function parseGoogleTranslate(data) {
   return result;
 }
 
-function translateText(text, sourceLang, targetLang, callback) {
+function handleTranslateResponse(error, response, data, callback) {
+  if (error || !response || response.status >= 400 || !data) {
+    callback("");
+    return;
+  }
+
+  try {
+    callback(parseGoogleTranslate(data));
+  } catch (e) {
+    callback("");
+  }
+}
+
+function translateTextByGet(text, sourceLang, targetLang, callback) {
   const url =
     "https://translate.googleapis.com/translate_a/single?client=gtx" +
     "&sl=" + encodeURIComponent(sourceLang || "auto") +
@@ -668,16 +702,40 @@ function translateText(text, sourceLang, targetLang, callback) {
       timeout: REQUEST_TIMEOUT
     },
     function (error, response, data) {
+      handleTranslateResponse(error, response, data, callback);
+    }
+  );
+}
+
+function translateText(text, sourceLang, targetLang, callback) {
+  const url =
+    "https://translate.googleapis.com/translate_a/single?client=gtx" +
+    "&sl=" + encodeURIComponent(sourceLang || "auto") +
+    "&tl=" + encodeURIComponent(targetLang) +
+    "&dt=t";
+
+  $httpClient.post(
+    {
+      url: url,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "User-Agent": "Surge timedtext translator"
+      },
+      body: "q=" + encodeURIComponent(text),
+      timeout: REQUEST_TIMEOUT
+    },
+    function (error, response, data) {
       if (error || !response || response.status >= 400 || !data) {
+        if (encodeURIComponent(text).length <= MAX_TRANSLATE_GET_LENGTH) {
+          translateTextByGet(text, sourceLang, targetLang, callback);
+          return;
+        }
+
         callback("");
         return;
       }
 
-      try {
-        callback(parseGoogleTranslate(data));
-      } catch (e) {
-        callback("");
-      }
+      handleTranslateResponse(error, response, data, callback);
     }
   );
 }
@@ -696,7 +754,7 @@ function applyMarkedTranslations(translatedText, items, cache) {
 
   while ((match = markerRegex.exec(translatedText)) !== null) {
     const index = Number(match[1]);
-    const text = String(match[2] || "").trim();
+    const text = cleanSpeakerMarkers(String(match[2] || "").trim());
 
     if (items[index] && text) {
       items[index].translated = text;
@@ -708,11 +766,12 @@ function applyMarkedTranslations(translatedText, items, cache) {
   return count;
 }
 
-function buildChunks(items, maxChunks) {
+function buildChunks(items, maxChunks, maxTranslateBodyLength) {
   const chunks = [];
   let current = [];
   let currentText = "";
   const limit = maxChunks || MAX_CHUNKS_PER_RESPONSE;
+  const textLimit = maxTranslateBodyLength || MAX_TRANSLATE_BODY_LENGTH;
 
   for (let index = 0; index < items.length; index += 1) {
     if (!items[index].text || items[index].translated) {
@@ -729,7 +788,7 @@ function buildChunks(items, maxChunks) {
 
     if (
       current.length > 0 &&
-      encodeURIComponent(nextText).length > MAX_URL_LENGTH
+      encodeURIComponent(nextText).length > textLimit
     ) {
       chunks.push(current);
       current = [nextItem];
@@ -864,6 +923,10 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
   });
 
   writeJson(key, cache);
+  if (stats && stats.metaState) {
+    consumeMeta(stats.metaState);
+  }
+
   normalizeHeaders();
   headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
   headers.Pragma = "no-cache";
@@ -900,7 +963,8 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
 }
 
 const options = parseArguments();
-const meta = getMeta();
+const metaState = getMetaState();
+const meta = metaState ? metaState.meta : null;
 
 if (!meta) {
   console.log("YouTube timedtext skipped: no target language metadata");
@@ -915,6 +979,7 @@ if (!meta) {
     meta.targetLang.split(/[-_]/)[0].toLowerCase()
 ) {
   console.log("YouTube timedtext skipped same language: " + meta.sourceLang);
+  consumeMeta(metaState);
   headers["X-YT-AutoTrans"] = "skipped=same-language";
   $done({
     headers: headers
@@ -964,10 +1029,11 @@ if (!meta) {
       failed: 0,
       longTrack: plan.longTrack,
       deadlineMs: plan.deadlineMs,
-      allowSelfReload: plan.allowSelfReload
+      allowSelfReload: plan.allowSelfReload,
+      metaState: metaState
     });
   } else {
-    const chunks = buildChunks(items, plan.maxChunks);
+    const chunks = buildChunks(items, plan.maxChunks, plan.maxTranslateBodyLength);
     let completedCount = 0;
     let translatedCount = 0;
     let failedCount = 0;
@@ -996,7 +1062,8 @@ if (!meta) {
         failed: failedCount,
         longTrack: plan.longTrack,
         deadlineMs: plan.deadlineMs,
-        allowSelfReload: plan.allowSelfReload
+        allowSelfReload: plan.allowSelfReload,
+        metaState: metaState
       });
     }
 
@@ -1049,7 +1116,8 @@ if (!meta) {
         failed: 0,
         longTrack: plan.longTrack,
         deadlineMs: plan.deadlineMs,
-        allowSelfReload: plan.allowSelfReload
+        allowSelfReload: plan.allowSelfReload,
+        metaState: metaState
       });
     } else {
       setTimeout(function () {
