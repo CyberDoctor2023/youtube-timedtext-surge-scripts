@@ -1,11 +1,15 @@
-const REQUEST_TIMEOUT = 3;
+const REQUEST_TIMEOUT = 4;
 const RESPONSE_DEADLINE_MS = 7500;
-const LONG_TRACK_DEADLINE_MS = 6500;
-const MAX_URL_LENGTH = 5000;
+const LONG_TRACK_DEADLINE_MS = 7000;
+const MAX_TRANSLATE_GET_LENGTH = 5000;
+const MAX_TRANSLATE_BODY_LENGTH = 12000;
+const MAX_LONG_TRACK_TRANSLATE_BODY_LENGTH = 16000;
 const MAX_CHUNKS_PER_RESPONSE = 24;
 const MAX_LONG_TRACK_CHUNKS = 24;
 const MAX_PARALLEL_REQUESTS = 4;
 const MAX_LONG_TRACK_PARALLEL_REQUESTS = 4;
+const MAX_GET_FALLBACK_PARTS = 8;
+const MAX_GET_FALLBACK_PARALLEL_REQUESTS = 2;
 const MAX_SELF_RELOADS = 3;
 const RELOAD_TTL_MS = 60 * 1000;
 const LONG_TRACK_BODY_LENGTH = 240000;
@@ -22,12 +26,32 @@ const CACHE_VERSION = 20;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
-  position: "Forward"
+  position: "Forward",
+  debugNoMeta: false,
+  debugTranslateFailure: true
 };
 const TRANSLATE_TIMEOUT_TEXT = "[YT AutoTrans] Google 翻译服务超时，请检查节点或稍后重试。";
+const NO_META_TEXT = "[YT AutoTrans] skipped=no-meta\n响应脚本已命中，但没有找到 tlang 元数据。\n请检查本次请求前是否有 youtube-timedtext-request 302。";
+const TRANSLATE_FAILED_TEXT = "[YT AutoTrans] translate failed\n已拿到 tlang 元数据，但 POST 和 fallback GET 没有拿到有效译文。\n请检查 translate.googleapis.com 请求是否 timeout / 429 / blocked。";
 
 let body = $response.body || "";
 let headers = Object.assign({}, $response.headers || {});
+const translateStats = {
+  postError: 0,
+  postHttp: 0,
+  postRedirect: 0,
+  postSorry: 0,
+  postEmpty: 0,
+  postParse: 0,
+  getError: 0,
+  getHttp: 0,
+  getRedirect: 0,
+  getSorry: 0,
+  getEmpty: 0,
+  getParse: 0,
+  getParts: 0,
+  markerMiss: 0
+};
 
 const pRegex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
 const sRegex = /<s\b([^>]*)>([\s\S]*?)<\/s>/g;
@@ -47,22 +71,6 @@ function hashString(text) {
 
 function metaKey(cleanUrl) {
   return "yt_tt_meta_" + hashString(cleanUrl);
-}
-
-function trackMetaKey(urlString) {
-  try {
-    const url = new URL(urlString);
-    const keys = ["v", "lang", "kind", "variant", "format"];
-    const parts = [url.origin, url.pathname];
-
-    for (let index = 0; index < keys.length; index += 1) {
-      parts.push(keys[index] + "=" + (url.searchParams.get(keys[index]) || ""));
-    }
-
-    return "yt_tt_track_" + hashString(parts.join("|"));
-  } catch (error) {
-    return "yt_tt_track_" + hashString(urlString);
-  }
 }
 
 function cacheKey(cleanUrl, targetLang) {
@@ -119,6 +127,12 @@ function parseArguments() {
   }
 
   const mode = String(argument.mode || argument.Mode || "").toLowerCase();
+  const debug = String(argument.debug || argument.Debug || "translate").toLowerCase();
+  const provider = String(argument.provider || argument.Provider || "google").toLowerCase();
+
+  if (provider && provider !== "google") {
+    console.log("YT AutoTrans provider fallback to google: " + provider);
+  }
 
   if (mode === "single" || mode === "mono" || mode === "translate" || mode === "translation-only") {
     options.showOnly = true;
@@ -163,6 +177,20 @@ function parseArguments() {
     options.position = "Reverse";
   }
 
+  if (debug === "all" || debug === "on" || debug === "true" || debug === "1") {
+    options.debugNoMeta = true;
+    options.debugTranslateFailure = true;
+  } else if (debug === "no-meta" || debug === "nometa") {
+    options.debugNoMeta = true;
+    options.debugTranslateFailure = false;
+  } else if (debug === "off" || debug === "false" || debug === "0") {
+    options.debugNoMeta = false;
+    options.debugTranslateFailure = false;
+  } else {
+    options.debugNoMeta = false;
+    options.debugTranslateFailure = true;
+  }
+
   return options;
 }
 
@@ -184,17 +212,37 @@ function writeJson(key, value) {
   $persistentStore.write(JSON.stringify(value), key);
 }
 
-function getMeta() {
-  const meta =
-    readJson(metaKey($request.url)) ||
-    readJson(metaKey(canonicalTimedtextUrl($request.url))) ||
-    readJson(trackMetaKey($request.url));
+function clearStoreKey(key) {
+  if (key) {
+    $persistentStore.write("", key);
+  }
+}
+
+function getMetaState() {
+  const exactKey = metaKey($request.url);
+  const canonicalKey = metaKey(canonicalTimedtextUrl($request.url));
+  const exactMeta = readJson(exactKey);
+  const canonicalMeta = exactKey === canonicalKey ? null : readJson(canonicalKey);
+  const meta = exactMeta || canonicalMeta;
 
   if (!meta || !meta.targetLang || !meta.expiresAt || Date.now() > meta.expiresAt) {
     return null;
   }
 
-  return meta;
+  return {
+    meta: meta,
+    keys: exactKey === canonicalKey ? [exactKey] : [exactKey, canonicalKey]
+  };
+}
+
+function consumeMeta(metaState) {
+  if (!metaState || !metaState.keys) {
+    return;
+  }
+
+  for (let index = 0; index < metaState.keys.length; index += 1) {
+    clearStoreKey(metaState.keys[index]);
+  }
 }
 
 function getTranslationCache(key) {
@@ -248,6 +296,16 @@ function decodeXml(text) {
     .replace(/&amp;/g, "&");
 }
 
+function cleanSpeakerMarkers(text) {
+  return String(text || "")
+    .split("\n")
+    .map(function (line) {
+      return line.replace(/^\s*(?:(?:>>|<<|＞＞|＜＜|》》|《《)\s*)+/, "");
+    })
+    .join("\n")
+    .trim();
+}
+
 function encodeXml(text) {
   return String(text || "")
     .replace(/&/g, "&amp;")
@@ -277,10 +335,10 @@ function extractText(content) {
   }
 
   if (text.trim()) {
-    return text.trim();
+    return cleanSpeakerMarkers(text.trim());
   }
 
-  return decodeXml(String(content || "").replace(/<[^>]+>/g, "")).trim();
+  return cleanSpeakerMarkers(decodeXml(String(content || "").replace(/<[^>]+>/g, "")).trim());
 }
 
 function parseAttrs(attrs) {
@@ -580,6 +638,9 @@ function addShortCueContext(items) {
 }
 
 function makeSubtitleText(sourceText, translatedText, options) {
+  sourceText = cleanSpeakerMarkers(sourceText);
+  translatedText = cleanSpeakerMarkers(translatedText);
+
   if (options.showOnly) {
     return translatedText;
   }
@@ -622,6 +683,7 @@ function makePlan(items, input) {
       deadlineMs: RESPONSE_DEADLINE_MS,
       maxChunks: MAX_CHUNKS_PER_RESPONSE,
       maxParallelRequests: MAX_PARALLEL_REQUESTS,
+      maxTranslateBodyLength: MAX_TRANSLATE_BODY_LENGTH,
       allowSelfReload: true
     };
   }
@@ -631,6 +693,7 @@ function makePlan(items, input) {
     deadlineMs: LONG_TRACK_DEADLINE_MS,
     maxChunks: MAX_LONG_TRACK_CHUNKS,
     maxParallelRequests: MAX_LONG_TRACK_PARALLEL_REQUESTS,
+    maxTranslateBodyLength: MAX_LONG_TRACK_TRANSLATE_BODY_LENGTH,
     allowSelfReload: false
   };
 }
@@ -652,7 +715,152 @@ function parseGoogleTranslate(data) {
   return result;
 }
 
-function translateText(text, sourceLang, targetLang, callback) {
+function addTranslateStat(method, reason) {
+  const key = method + reason.charAt(0).toUpperCase() + reason.slice(1);
+
+  if (translateStats[key] !== undefined) {
+    translateStats[key] += 1;
+  }
+}
+
+function translateStatsHeader() {
+  const parts = [];
+  const keys = Object.keys(translateStats);
+
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+
+    if (translateStats[key]) {
+      parts.push(key + "=" + translateStats[key]);
+    }
+  }
+
+  return parts.length ? ";" + parts.join(";") : "";
+}
+
+function hasTranslateRedirectBlock() {
+  return (
+    translateStats.getSorry > 0 ||
+    translateStats.getRedirect > 0
+  );
+}
+
+function translateFailureText(status) {
+  if (translateStats.getSorry > 0 || translateStats.postSorry > 0) {
+    return "[YT AutoTrans] Google Sorry / 风控\ntranslate.googleapis.com 被重定向到 Google Sorry 页面。\n请更换更干净的节点，或稍后重试。";
+  }
+
+  if (translateStats.getRedirect > 0 || translateStats.postRedirect > 0) {
+    return "[YT AutoTrans] Google 翻译重定向\ntranslate.googleapis.com 返回 3xx，不是翻译 JSON。\n请检查节点、Google 风控或代理规则。";
+  }
+
+  if (String(status || "").indexOf("timeout") !== -1) {
+    return "[YT AutoTrans] 翻译超时\n已拿到 YouTube 字幕，但翻译请求在预算内没有完成。\n请检查节点速度或稍后重试。";
+  }
+
+  if (translateStats.getError > 0 || translateStats.postError > 0) {
+    return "[YT AutoTrans] 翻译请求错误\nPOST/GET 翻译请求发生网络错误。\n请检查 translate.googleapis.com 连接。";
+  }
+
+  if (translateStats.getHttp > 0 || translateStats.postHttp > 0) {
+    return "[YT AutoTrans] 翻译 HTTP 错误\nGoogle 翻译接口返回 HTTP 错误状态。\n请检查是否被限流或阻断。";
+  }
+
+  if (translateStats.getParse > 0 || translateStats.postParse > 0) {
+    return "[YT AutoTrans] 翻译响应解析失败\nGoogle 有响应，但不是脚本预期的 JSON 格式。\n请查看 Surge 中 translate.googleapis.com 响应体。";
+  }
+
+  if (translateStats.markerMiss > 0) {
+    return "[YT AutoTrans] 翻译标记丢失\nGoogle 有返回，但字幕编号标记没有匹配回来。\n可能是批量文本被翻译器改写。";
+  }
+
+  if (translateStats.getEmpty > 0 || translateStats.postEmpty > 0) {
+    return "[YT AutoTrans] 翻译结果为空\nGoogle 有响应，但脚本没有拿到可用译文。\n请检查响应内容是否为空或被替换。";
+  }
+
+  return TRANSLATE_FAILED_TEXT;
+}
+
+function handleTranslateResponse(method, error, response, data, callback) {
+  if (error || !response) {
+    addTranslateStat(method, "error");
+    callback("");
+    return;
+  }
+
+  const location = response.headers && (response.headers.Location || response.headers.location);
+
+  if (
+    response.status >= 300 &&
+    response.status < 400 &&
+    /google\.com\/sorry/i.test(String(location || data || ""))
+  ) {
+    addTranslateStat(method, "sorry");
+    callback("");
+    return;
+  }
+
+  if (response.status >= 300 && response.status < 400) {
+    addTranslateStat(method, "redirect");
+    callback("");
+    return;
+  }
+
+  if (response.status >= 400) {
+    addTranslateStat(method, "http");
+    callback("");
+    return;
+  }
+
+  if (!data) {
+    addTranslateStat(method, "empty");
+    callback("");
+    return;
+  }
+
+  try {
+    const translated = parseGoogleTranslate(data);
+
+    if (!translated) {
+      addTranslateStat(method, "empty");
+    }
+
+    callback(translated);
+  } catch (e) {
+    addTranslateStat(method, "parse");
+    callback("");
+  }
+}
+
+function splitMarkedTextForGet(text) {
+  const parts = [];
+  const lines = String(text || "").split("\n");
+  let current = "";
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const next = current ? current + "\n" + line : line;
+
+    if (current && encodeURIComponent(next).length > MAX_TRANSLATE_GET_LENGTH) {
+      parts.push(current);
+      current = line;
+    } else {
+      current = next;
+    }
+
+    if (parts.length >= MAX_GET_FALLBACK_PARTS) {
+      break;
+    }
+  }
+
+  if (current && parts.length < MAX_GET_FALLBACK_PARTS) {
+    parts.push(current);
+  }
+
+  return parts;
+}
+
+function translateTextByGet(text, sourceLang, targetLang, callback) {
   const url =
     "https://translate.googleapis.com/translate_a/single?client=gtx" +
     "&sl=" + encodeURIComponent(sourceLang || "auto") +
@@ -668,18 +876,106 @@ function translateText(text, sourceLang, targetLang, callback) {
       timeout: REQUEST_TIMEOUT
     },
     function (error, response, data) {
-      if (error || !response || response.status >= 400 || !data) {
-        callback("");
-        return;
-      }
-
-      try {
-        callback(parseGoogleTranslate(data));
-      } catch (e) {
-        callback("");
-      }
+      handleTranslateResponse("get", error, response, data, callback);
     }
   );
+}
+
+function translateMarkedTextByGetFallback(text, sourceLang, targetLang, callback) {
+  const parts = splitMarkedTextForGet(text);
+  const results = [];
+  let nextIndex = 0;
+  let activeCount = 0;
+  let completedCount = 0;
+  let successCount = 0;
+  let finished = false;
+
+  function completeIfDone() {
+    if (finished || completedCount < parts.length) {
+      return;
+    }
+
+    finished = true;
+    callback(successCount > 0 ? results.filter(Boolean).join("\n") : "");
+  }
+
+  function startNext() {
+    while (
+      !finished &&
+      activeCount < MAX_GET_FALLBACK_PARALLEL_REQUESTS &&
+      nextIndex < parts.length
+    ) {
+      const partIndex = nextIndex;
+      const part = parts[partIndex];
+      nextIndex += 1;
+      activeCount += 1;
+      translateStats.getParts += 1;
+
+      translateTextByGet(part, sourceLang, targetLang, function (translatedText) {
+        activeCount -= 1;
+        completedCount += 1;
+
+        if (translatedText) {
+          results[partIndex] = translatedText;
+          successCount += 1;
+        } else {
+          results[partIndex] = "";
+        }
+
+        if (completedCount >= parts.length) {
+          completeIfDone();
+        } else {
+          startNext();
+        }
+      });
+    }
+  }
+
+  if (parts.length === 0) {
+    callback("");
+    return;
+  }
+
+  startNext();
+}
+
+function translateTextByPost(text, sourceLang, targetLang, callback) {
+  const url =
+    "https://translate.googleapis.com/translate_a/single?client=gtx" +
+    "&sl=" + encodeURIComponent(sourceLang || "auto") +
+    "&tl=" + encodeURIComponent(targetLang) +
+    "&dt=t";
+
+  $httpClient.post(
+    {
+      url: url,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "User-Agent": "Surge timedtext translator"
+      },
+      body: "q=" + encodeURIComponent(text),
+      timeout: REQUEST_TIMEOUT
+    },
+    function (error, response, data) {
+      handleTranslateResponse("post", error, response, data, callback);
+    }
+  );
+}
+
+function translateText(text, sourceLang, targetLang, callback) {
+  translateTextByPost(text, sourceLang, targetLang, function (translatedText) {
+    if (translatedText) {
+      callback(translatedText);
+      return;
+    }
+
+    if (encodeURIComponent(text).length <= MAX_TRANSLATE_GET_LENGTH) {
+      translateTextByGet(text, sourceLang, targetLang, callback);
+      return;
+    }
+
+    translateMarkedTextByGetFallback(text, sourceLang, targetLang, callback);
+  });
 }
 
 function makeMarkedText(chunk) {
@@ -696,7 +992,7 @@ function applyMarkedTranslations(translatedText, items, cache) {
 
   while ((match = markerRegex.exec(translatedText)) !== null) {
     const index = Number(match[1]);
-    const text = String(match[2] || "").trim();
+    const text = cleanSpeakerMarkers(String(match[2] || "").trim());
 
     if (items[index] && text) {
       items[index].translated = text;
@@ -708,11 +1004,12 @@ function applyMarkedTranslations(translatedText, items, cache) {
   return count;
 }
 
-function buildChunks(items, maxChunks) {
+function buildChunks(items, maxChunks, maxTranslateBodyLength) {
   const chunks = [];
   let current = [];
   let currentText = "";
   const limit = maxChunks || MAX_CHUNKS_PER_RESPONSE;
+  const textLimit = maxTranslateBodyLength || MAX_TRANSLATE_BODY_LENGTH;
 
   for (let index = 0; index < items.length; index += 1) {
     if (!items[index].text || items[index].translated) {
@@ -729,7 +1026,7 @@ function buildChunks(items, maxChunks) {
 
     if (
       current.length > 0 &&
-      encodeURIComponent(nextText).length > MAX_URL_LENGTH
+      encodeURIComponent(nextText).length > textLimit
     ) {
       chunks.push(current);
       current = [nextItem];
@@ -757,6 +1054,20 @@ function markTranslateTimeoutTrack(items) {
   for (let index = 0; index < items.length; index += 1) {
     if (items[index].text) {
       items[index].translated = TRANSLATE_TIMEOUT_TEXT;
+      items[index].diagnostic = true;
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function markDiagnosticTrack(items, text) {
+  let count = 0;
+
+  for (let index = 0; index < items.length; index += 1) {
+    if (items[index].text) {
+      items[index].translated = text;
       items[index].diagnostic = true;
       count += 1;
     }
@@ -864,6 +1175,10 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
   });
 
   writeJson(key, cache);
+  if (stats && stats.metaState) {
+    consumeMeta(stats.metaState);
+  }
+
   normalizeHeaders();
   headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
   headers.Pragma = "no-cache";
@@ -883,6 +1198,7 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
     ";missing=" +
     countUntranslatedItems(items) +
     (stats && stats.deadlineMs ? ";budget=" + stats.deadlineMs + "ms" : "") +
+    translateStatsHeader() +
     (status ? ";status=" + status : "");
 
   console.log(
@@ -899,15 +1215,57 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
   });
 }
 
+function finishDiagnostic(status, text) {
+  let count = 0;
+  let replaced = false;
+
+  if (isAutomaticCaption(body, $request.url)) {
+    body = normalizeTimedtextLayout(body);
+  }
+
+  body = body.replace(pRegex, function (match, attrs, content) {
+    if (isSpacerParagraph(attrs, content)) {
+      return match;
+    }
+
+    replaced = true;
+    count += 1;
+    return "<p" + attrs + "><s ac=\"0\">" + encodeSubtitleText(text) + "</s></p>";
+  });
+
+  if (!replaced) {
+    body = body.replace(
+      /<\/body>/,
+      "<p t=\"0\" d=\"4000\"><s ac=\"0\">" + encodeSubtitleText(text) + "</s></p></body>"
+    );
+  }
+
+  normalizeHeaders();
+  headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+  headers.Pragma = "no-cache";
+  headers.Expires = "0";
+  headers["X-YT-AutoTrans"] = status + ";diagnostic=all-cues;diagnosticItems=" + count;
+
+  $done({
+    body: body,
+    headers: headers
+  });
+}
+
 const options = parseArguments();
-const meta = getMeta();
+const metaState = getMetaState();
+const meta = metaState ? metaState.meta : null;
 
 if (!meta) {
   console.log("YouTube timedtext skipped: no target language metadata");
-  headers["X-YT-AutoTrans"] = "skipped=no-meta";
-  $done({
-    headers: headers
-  });
+  if (options.debugNoMeta) {
+    finishDiagnostic("skipped=no-meta", NO_META_TEXT);
+  } else {
+    headers["X-YT-AutoTrans"] = "skipped=no-meta;diagnostic=off";
+    $done({
+      headers: headers
+    });
+  }
 } else if (
   meta.sourceLang &&
   meta.targetLang &&
@@ -915,6 +1273,7 @@ if (!meta) {
     meta.targetLang.split(/[-_]/)[0].toLowerCase()
 ) {
   console.log("YouTube timedtext skipped same language: " + meta.sourceLang);
+  consumeMeta(metaState);
   headers["X-YT-AutoTrans"] = "skipped=same-language";
   $done({
     headers: headers
@@ -964,10 +1323,11 @@ if (!meta) {
       failed: 0,
       longTrack: plan.longTrack,
       deadlineMs: plan.deadlineMs,
-      allowSelfReload: plan.allowSelfReload
+      allowSelfReload: plan.allowSelfReload,
+      metaState: metaState
     });
   } else {
-    const chunks = buildChunks(items, plan.maxChunks);
+    const chunks = buildChunks(items, plan.maxChunks, plan.maxTranslateBodyLength);
     let completedCount = 0;
     let translatedCount = 0;
     let failedCount = 0;
@@ -984,10 +1344,11 @@ if (!meta) {
       finished = true;
 
       if (translatedCount === 0 && status) {
-        if (plan.longTrack) {
-          status = status + ";fast-return";
+        if (options.debugTranslateFailure) {
+          markDiagnosticTrack(items, translateFailureText(status));
+          status = status + ";diagnostic=all-cues";
         } else {
-          markTranslateTimeoutTrack(items);
+          status = status + ";fast-return";
         }
       }
 
@@ -996,7 +1357,8 @@ if (!meta) {
         failed: failedCount,
         longTrack: plan.longTrack,
         deadlineMs: plan.deadlineMs,
-        allowSelfReload: plan.allowSelfReload
+        allowSelfReload: plan.allowSelfReload,
+        metaState: metaState
       });
     }
 
@@ -1006,14 +1368,21 @@ if (!meta) {
       }
 
       if (translatedText) {
-        translatedCount += applyMarkedTranslations(translatedText, items, cache);
+        const appliedCount = applyMarkedTranslations(translatedText, items, cache);
+        translatedCount += appliedCount;
+
+        if (appliedCount === 0) {
+          translateStats.markerMiss += 1;
+        }
       } else {
         failedCount += 1;
       }
 
       completedCount += 1;
 
-      if (completedCount >= chunks.length) {
+      if (translatedCount === 0 && hasTranslateRedirectBlock()) {
+        complete("translate redirect");
+      } else if (completedCount >= chunks.length) {
         complete(translatedCount === 0 && failedCount > 0 ? "translate failed" : "");
       } else {
         startNextChunks();
@@ -1049,7 +1418,8 @@ if (!meta) {
         failed: 0,
         longTrack: plan.longTrack,
         deadlineMs: plan.deadlineMs,
-        allowSelfReload: plan.allowSelfReload
+        allowSelfReload: plan.allowSelfReload,
+        metaState: metaState
       });
     } else {
       setTimeout(function () {
