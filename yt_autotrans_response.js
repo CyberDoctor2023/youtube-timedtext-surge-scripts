@@ -39,10 +39,14 @@ let headers = Object.assign({}, $response.headers || {});
 const translateStats = {
   postError: 0,
   postHttp: 0,
+  postRedirect: 0,
+  postSorry: 0,
   postEmpty: 0,
   postParse: 0,
   getError: 0,
   getHttp: 0,
+  getRedirect: 0,
+  getSorry: 0,
   getEmpty: 0,
   getParse: 0,
   getParts: 0,
@@ -124,6 +128,11 @@ function parseArguments() {
 
   const mode = String(argument.mode || argument.Mode || "").toLowerCase();
   const debug = String(argument.debug || argument.Debug || "translate").toLowerCase();
+  const provider = String(argument.provider || argument.Provider || "google").toLowerCase();
+
+  if (provider && provider !== "google") {
+    console.log("YT AutoTrans provider fallback to google: " + provider);
+  }
 
   if (mode === "single" || mode === "mono" || mode === "translate" || mode === "translation-only") {
     options.showOnly = true;
@@ -732,6 +741,24 @@ function translateStatsHeader() {
 function handleTranslateResponse(method, error, response, data, callback) {
   if (error || !response) {
     addTranslateStat(method, "error");
+    callback("");
+    return;
+  }
+
+  const location = response.headers && (response.headers.Location || response.headers.location);
+
+  if (
+    response.status >= 300 &&
+    response.status < 400 &&
+    /google\.com\/sorry/i.test(String(location || data || ""))
+  ) {
+    addTranslateStat(method, "sorry");
+    callback("");
+    return;
+  }
+
+  if (response.status >= 300 && response.status < 400) {
+    addTranslateStat(method, "redirect");
     callback("");
     return;
   }
