@@ -1,13 +1,15 @@
-const REQUEST_TIMEOUT = 3;
+const REQUEST_TIMEOUT = 4;
 const RESPONSE_DEADLINE_MS = 7500;
-const LONG_TRACK_DEADLINE_MS = 6500;
+const LONG_TRACK_DEADLINE_MS = 7000;
 const MAX_TRANSLATE_GET_LENGTH = 5000;
-const MAX_TRANSLATE_BODY_LENGTH = 24000;
-const MAX_LONG_TRACK_TRANSLATE_BODY_LENGTH = 32000;
+const MAX_TRANSLATE_BODY_LENGTH = 12000;
+const MAX_LONG_TRACK_TRANSLATE_BODY_LENGTH = 16000;
 const MAX_CHUNKS_PER_RESPONSE = 24;
 const MAX_LONG_TRACK_CHUNKS = 24;
 const MAX_PARALLEL_REQUESTS = 4;
-const MAX_LONG_TRACK_PARALLEL_REQUESTS = 8;
+const MAX_LONG_TRACK_PARALLEL_REQUESTS = 4;
+const MAX_GET_FALLBACK_PARTS = 8;
+const MAX_GET_FALLBACK_PARALLEL_REQUESTS = 2;
 const MAX_SELF_RELOADS = 3;
 const RELOAD_TTL_MS = 60 * 1000;
 const LONG_TRACK_BODY_LENGTH = 240000;
@@ -686,6 +688,34 @@ function handleTranslateResponse(error, response, data, callback) {
   }
 }
 
+function splitMarkedTextForGet(text) {
+  const parts = [];
+  const lines = String(text || "").split("\n");
+  let current = "";
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const next = current ? current + "\n" + line : line;
+
+    if (current && encodeURIComponent(next).length > MAX_TRANSLATE_GET_LENGTH) {
+      parts.push(current);
+      current = line;
+    } else {
+      current = next;
+    }
+
+    if (parts.length >= MAX_GET_FALLBACK_PARTS) {
+      break;
+    }
+  }
+
+  if (current && parts.length < MAX_GET_FALLBACK_PARTS) {
+    parts.push(current);
+  }
+
+  return parts;
+}
+
 function translateTextByGet(text, sourceLang, targetLang, callback) {
   const url =
     "https://translate.googleapis.com/translate_a/single?client=gtx" +
@@ -707,7 +737,64 @@ function translateTextByGet(text, sourceLang, targetLang, callback) {
   );
 }
 
-function translateText(text, sourceLang, targetLang, callback) {
+function translateMarkedTextByGetFallback(text, sourceLang, targetLang, callback) {
+  const parts = splitMarkedTextForGet(text);
+  const results = [];
+  let nextIndex = 0;
+  let activeCount = 0;
+  let completedCount = 0;
+  let successCount = 0;
+  let finished = false;
+
+  function completeIfDone() {
+    if (finished || completedCount < parts.length) {
+      return;
+    }
+
+    finished = true;
+    callback(successCount > 0 ? results.filter(Boolean).join("\n") : "");
+  }
+
+  function startNext() {
+    while (
+      !finished &&
+      activeCount < MAX_GET_FALLBACK_PARALLEL_REQUESTS &&
+      nextIndex < parts.length
+    ) {
+      const partIndex = nextIndex;
+      const part = parts[partIndex];
+      nextIndex += 1;
+      activeCount += 1;
+
+      translateTextByGet(part, sourceLang, targetLang, function (translatedText) {
+        activeCount -= 1;
+        completedCount += 1;
+
+        if (translatedText) {
+          results[partIndex] = translatedText;
+          successCount += 1;
+        } else {
+          results[partIndex] = "";
+        }
+
+        if (completedCount >= parts.length) {
+          completeIfDone();
+        } else {
+          startNext();
+        }
+      });
+    }
+  }
+
+  if (parts.length === 0) {
+    callback("");
+    return;
+  }
+
+  startNext();
+}
+
+function translateTextByPost(text, sourceLang, targetLang, callback) {
   const url =
     "https://translate.googleapis.com/translate_a/single?client=gtx" +
     "&sl=" + encodeURIComponent(sourceLang || "auto") +
@@ -725,19 +812,25 @@ function translateText(text, sourceLang, targetLang, callback) {
       timeout: REQUEST_TIMEOUT
     },
     function (error, response, data) {
-      if (error || !response || response.status >= 400 || !data) {
-        if (encodeURIComponent(text).length <= MAX_TRANSLATE_GET_LENGTH) {
-          translateTextByGet(text, sourceLang, targetLang, callback);
-          return;
-        }
-
-        callback("");
-        return;
-      }
-
       handleTranslateResponse(error, response, data, callback);
     }
   );
+}
+
+function translateText(text, sourceLang, targetLang, callback) {
+  translateTextByPost(text, sourceLang, targetLang, function (translatedText) {
+    if (translatedText) {
+      callback(translatedText);
+      return;
+    }
+
+    if (encodeURIComponent(text).length <= MAX_TRANSLATE_GET_LENGTH) {
+      translateTextByGet(text, sourceLang, targetLang, callback);
+      return;
+    }
+
+    translateMarkedTextByGetFallback(text, sourceLang, targetLang, callback);
+  });
 }
 
 function makeMarkedText(chunk) {
