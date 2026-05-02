@@ -26,7 +26,9 @@ const CACHE_VERSION = 20;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OPTIONS = {
   showOnly: false,
-  position: "Forward"
+  position: "Forward",
+  debugNoMeta: false,
+  debugTranslateFailure: true
 };
 const TRANSLATE_TIMEOUT_TEXT = "[YT AutoTrans] Google 翻译服务超时，请检查节点或稍后重试。";
 const NO_META_TEXT = "[YT AutoTrans] skipped=no-meta\n响应脚本已命中，但没有找到 tlang 元数据。\n请检查本次请求前是否有 youtube-timedtext-request 302。";
@@ -109,6 +111,7 @@ function parseArguments() {
   }
 
   const mode = String(argument.mode || argument.Mode || "").toLowerCase();
+  const debug = String(argument.debug || argument.Debug || "translate").toLowerCase();
 
   if (mode === "single" || mode === "mono" || mode === "translate" || mode === "translation-only") {
     options.showOnly = true;
@@ -151,6 +154,20 @@ function parseArguments() {
 
   if (String(argument.order || "") === "target-source") {
     options.position = "Reverse";
+  }
+
+  if (debug === "all" || debug === "on" || debug === "true" || debug === "1") {
+    options.debugNoMeta = true;
+    options.debugTranslateFailure = true;
+  } else if (debug === "no-meta" || debug === "nometa") {
+    options.debugNoMeta = true;
+    options.debugTranslateFailure = false;
+  } else if (debug === "off" || debug === "false" || debug === "0") {
+    options.debugNoMeta = false;
+    options.debugTranslateFailure = false;
+  } else {
+    options.debugNoMeta = false;
+    options.debugTranslateFailure = true;
   }
 
   return options;
@@ -1114,7 +1131,14 @@ const meta = metaState ? metaState.meta : null;
 
 if (!meta) {
   console.log("YouTube timedtext skipped: no target language metadata");
-  finishDiagnostic("skipped=no-meta", NO_META_TEXT);
+  if (options.debugNoMeta) {
+    finishDiagnostic("skipped=no-meta", NO_META_TEXT);
+  } else {
+    headers["X-YT-AutoTrans"] = "skipped=no-meta;diagnostic=off";
+    $done({
+      headers: headers
+    });
+  }
 } else if (
   meta.sourceLang &&
   meta.targetLang &&
@@ -1194,8 +1218,12 @@ if (!meta) {
 
       if (translatedCount === 0 && status) {
         if (plan.longTrack) {
-          markDiagnosticTrack(items, TRANSLATE_FAILED_TEXT);
-          status = status + ";diagnostic=all-cues";
+          if (options.debugTranslateFailure) {
+            markDiagnosticTrack(items, TRANSLATE_FAILED_TEXT);
+            status = status + ";diagnostic=all-cues";
+          } else {
+            status = status + ";fast-return";
+          }
         } else {
           markTranslateTimeoutTrack(items);
         }
