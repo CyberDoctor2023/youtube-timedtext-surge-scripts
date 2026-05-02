@@ -36,6 +36,18 @@ const TRANSLATE_FAILED_TEXT = "[YT AutoTrans] translate failed\n已拿到 tlang 
 
 let body = $response.body || "";
 let headers = Object.assign({}, $response.headers || {});
+const translateStats = {
+  postError: 0,
+  postHttp: 0,
+  postEmpty: 0,
+  postParse: 0,
+  getError: 0,
+  getHttp: 0,
+  getEmpty: 0,
+  getParse: 0,
+  getParts: 0,
+  markerMiss: 0
+};
 
 const pRegex = /<p([^>]*)>([\s\S]*?)<\/p>/g;
 const sRegex = /<s\b([^>]*)>([\s\S]*?)<\/s>/g;
@@ -694,15 +706,58 @@ function parseGoogleTranslate(data) {
   return result;
 }
 
-function handleTranslateResponse(error, response, data, callback) {
-  if (error || !response || response.status >= 400 || !data) {
+function addTranslateStat(method, reason) {
+  const key = method + reason.charAt(0).toUpperCase() + reason.slice(1);
+
+  if (translateStats[key] !== undefined) {
+    translateStats[key] += 1;
+  }
+}
+
+function translateStatsHeader() {
+  const parts = [];
+  const keys = Object.keys(translateStats);
+
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+
+    if (translateStats[key]) {
+      parts.push(key + "=" + translateStats[key]);
+    }
+  }
+
+  return parts.length ? ";" + parts.join(";") : "";
+}
+
+function handleTranslateResponse(method, error, response, data, callback) {
+  if (error || !response) {
+    addTranslateStat(method, "error");
+    callback("");
+    return;
+  }
+
+  if (response.status >= 400) {
+    addTranslateStat(method, "http");
+    callback("");
+    return;
+  }
+
+  if (!data) {
+    addTranslateStat(method, "empty");
     callback("");
     return;
   }
 
   try {
-    callback(parseGoogleTranslate(data));
+    const translated = parseGoogleTranslate(data);
+
+    if (!translated) {
+      addTranslateStat(method, "empty");
+    }
+
+    callback(translated);
   } catch (e) {
+    addTranslateStat(method, "parse");
     callback("");
   }
 }
@@ -751,7 +806,7 @@ function translateTextByGet(text, sourceLang, targetLang, callback) {
       timeout: REQUEST_TIMEOUT
     },
     function (error, response, data) {
-      handleTranslateResponse(error, response, data, callback);
+      handleTranslateResponse("get", error, response, data, callback);
     }
   );
 }
@@ -784,6 +839,7 @@ function translateMarkedTextByGetFallback(text, sourceLang, targetLang, callback
       const part = parts[partIndex];
       nextIndex += 1;
       activeCount += 1;
+      translateStats.getParts += 1;
 
       translateTextByGet(part, sourceLang, targetLang, function (translatedText) {
         activeCount -= 1;
@@ -831,7 +887,7 @@ function translateTextByPost(text, sourceLang, targetLang, callback) {
       timeout: REQUEST_TIMEOUT
     },
     function (error, response, data) {
-      handleTranslateResponse(error, response, data, callback);
+      handleTranslateResponse("post", error, response, data, callback);
     }
   );
 }
@@ -1072,6 +1128,7 @@ function finish(items, translatedCount, cache, key, reloadStateKey, options, use
     ";missing=" +
     countUntranslatedItems(items) +
     (stats && stats.deadlineMs ? ";budget=" + stats.deadlineMs + "ms" : "") +
+    translateStatsHeader() +
     (status ? ";status=" + status : "");
 
   console.log(
@@ -1217,15 +1274,11 @@ if (!meta) {
       finished = true;
 
       if (translatedCount === 0 && status) {
-        if (plan.longTrack) {
-          if (options.debugTranslateFailure) {
-            markDiagnosticTrack(items, TRANSLATE_FAILED_TEXT);
-            status = status + ";diagnostic=all-cues";
-          } else {
-            status = status + ";fast-return";
-          }
+        if (options.debugTranslateFailure) {
+          markDiagnosticTrack(items, TRANSLATE_FAILED_TEXT);
+          status = status + ";diagnostic=all-cues";
         } else {
-          markTranslateTimeoutTrack(items);
+          status = status + ";fast-return";
         }
       }
 
@@ -1245,7 +1298,12 @@ if (!meta) {
       }
 
       if (translatedText) {
-        translatedCount += applyMarkedTranslations(translatedText, items, cache);
+        const appliedCount = applyMarkedTranslations(translatedText, items, cache);
+        translatedCount += appliedCount;
+
+        if (appliedCount === 0) {
+          translateStats.markerMiss += 1;
+        }
       } else {
         failedCount += 1;
       }
