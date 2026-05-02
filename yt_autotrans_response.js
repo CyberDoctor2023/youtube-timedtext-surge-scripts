@@ -738,6 +738,13 @@ function translateStatsHeader() {
   return parts.length ? ";" + parts.join(";") : "";
 }
 
+function hasTranslateRedirectBlock() {
+  return (
+    translateStats.getSorry > 0 ||
+    translateStats.getRedirect > 0
+  );
+}
+
 function handleTranslateResponse(method, error, response, data, callback) {
   if (error || !response) {
     addTranslateStat(method, "error");
@@ -1337,7 +1344,9 @@ if (!meta) {
 
       completedCount += 1;
 
-      if (completedCount >= chunks.length) {
+      if (translatedCount === 0 && hasTranslateRedirectBlock()) {
+        complete("translate redirect");
+      } else if (completedCount >= chunks.length) {
         complete(translatedCount === 0 && failedCount > 0 ? "translate failed" : "");
       } else {
         startNextChunks();

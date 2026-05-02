@@ -1,14 +1,14 @@
 #!name=🧪 YT AutoTrans Error Beta
-#!desc=识别 Google Sorry 重定向 / Detect Google Sorry redirects.
+#!desc=Google Sorry 快速返回诊断 / Fast diagnostics on Google Sorry.
 #!system=ios
 #!icon=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/main/assets/icon.svg
-#!version=beta23
-#!arguments=mode:dual,provider:google,debug:translate,version:beta23
-#!arguments-desc=[版本 / Version]\n\nversion=beta23：识别 translate.googleapis.com 返回的 Google Sorry/3xx 重定向，并在 header 标记 postSorry/getSorry/postRedirect/getRedirect；provider 目前仅支持 google，微软公共接口未启用；脚本不会读取 version 参数 / Detects Google Sorry and 3xx redirects from translate.googleapis.com in headers. provider currently supports google only; Microsoft public endpoints are not enabled. Scripts do not read the version parameter.\n\n[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.\n\n[翻译接口 / Provider]\n\nprovider=google：默认，使用 translate.googleapis.com gtx / Default Google gtx endpoint.\n\n[调试 / Debug]\n\ndebug=translate：默认，只在有 tlang/meta 但翻译全失败时覆盖所有字幕为调试信息 / Default. Show all-cue diagnostics only when translation fully fails after confirmed tlang/meta.\n\ndebug=all：同时对 no-meta 覆盖所有字幕，用于排查 302/meta 链路；会影响普通英文字幕 / Also diagnose no-meta; affects ordinary English captions.\n\ndebug=off：关闭调试字幕，失败时只写 header 并返回原字幕 / Disable diagnostic subtitles.
+#!version=beta24
+#!arguments=mode:dual,provider:google,debug:translate,version:beta24
+#!arguments-desc=[版本 / Version]\n\nversion=beta24：检测到 Google Sorry/3xx 重定向后立刻返回翻译失败诊断，避免继续等待 chunk 导致 YouTube 超时闪烁；provider 目前仅支持 google；脚本不会读取 version 参数 / Returns diagnostics immediately after Google Sorry/3xx redirects to avoid waiting for more chunks and causing YouTube timeout flicker. provider currently supports google only. Scripts do not read the version parameter.\n\n[模式 / Mode]\n\nmode=dual：双语，原文在上，译文在下；英译中时就是英中 / Source above translation.\n\nmode=reverse：双语，译文在上，原文在下；英译中时就是中英 / Translation above source.\n\nmode=single：单语，只显示译文 / Translation only.\n\n[翻译接口 / Provider]\n\nprovider=google：默认，使用 translate.googleapis.com gtx / Default Google gtx endpoint.\n\n[调试 / Debug]\n\ndebug=translate：默认，只在有 tlang/meta 但翻译全失败时覆盖所有字幕为调试信息 / Default. Show all-cue diagnostics only when translation fully fails after confirmed tlang/meta.\n\ndebug=all：同时对 no-meta 覆盖所有字幕，用于排查 302/meta 链路；会影响普通英文字幕 / Also diagnose no-meta; affects ordinary English captions.\n\ndebug=off：关闭调试字幕，失败时只写 header 并返回原字幕 / Disable diagnostic subtitles.
 
 [Script]
-youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/beta/yt_autotrans_request.js?v=beta23
-youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext,requires-body=true,max-size=10485760,timeout=60,script-update-interval=60,argument=mode={{{mode}}}&provider={{{provider}}}&debug={{{debug}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/beta/yt_autotrans_response.js?v=beta23
+youtube-timedtext-request = type=http-request,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext\?.*tlang=,timeout=5,script-update-interval=60,script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/beta/yt_autotrans_request.js?v=beta24
+youtube-timedtext-response = type=http-response,pattern=^https:\/\/www\.youtube\.com\/api\/timedtext,requires-body=true,max-size=10485760,timeout=60,script-update-interval=60,argument=mode={{{mode}}}&provider={{{provider}}}&debug={{{debug}}},script-path=https://raw.githubusercontent.com/CyberDoctor2023/yt-autotrans/beta/yt_autotrans_response.js?v=beta24
 
 [MITM]
 hostname = %APPEND% www.youtube.com
