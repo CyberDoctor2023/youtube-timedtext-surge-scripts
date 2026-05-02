@@ -745,6 +745,42 @@ function hasTranslateRedirectBlock() {
   );
 }
 
+function translateFailureText(status) {
+  if (translateStats.getSorry > 0 || translateStats.postSorry > 0) {
+    return "[YT AutoTrans] Google Sorry / 风控\ntranslate.googleapis.com 被重定向到 Google Sorry 页面。\n请更换更干净的节点，或稍后重试。";
+  }
+
+  if (translateStats.getRedirect > 0 || translateStats.postRedirect > 0) {
+    return "[YT AutoTrans] Google 翻译重定向\ntranslate.googleapis.com 返回 3xx，不是翻译 JSON。\n请检查节点、Google 风控或代理规则。";
+  }
+
+  if (String(status || "").indexOf("timeout") !== -1) {
+    return "[YT AutoTrans] 翻译超时\n已拿到 YouTube 字幕，但翻译请求在预算内没有完成。\n请检查节点速度或稍后重试。";
+  }
+
+  if (translateStats.getError > 0 || translateStats.postError > 0) {
+    return "[YT AutoTrans] 翻译请求错误\nPOST/GET 翻译请求发生网络错误。\n请检查 translate.googleapis.com 连接。";
+  }
+
+  if (translateStats.getHttp > 0 || translateStats.postHttp > 0) {
+    return "[YT AutoTrans] 翻译 HTTP 错误\nGoogle 翻译接口返回 HTTP 错误状态。\n请检查是否被限流或阻断。";
+  }
+
+  if (translateStats.getParse > 0 || translateStats.postParse > 0) {
+    return "[YT AutoTrans] 翻译响应解析失败\nGoogle 有响应，但不是脚本预期的 JSON 格式。\n请查看 Surge 中 translate.googleapis.com 响应体。";
+  }
+
+  if (translateStats.markerMiss > 0) {
+    return "[YT AutoTrans] 翻译标记丢失\nGoogle 有返回，但字幕编号标记没有匹配回来。\n可能是批量文本被翻译器改写。";
+  }
+
+  if (translateStats.getEmpty > 0 || translateStats.postEmpty > 0) {
+    return "[YT AutoTrans] 翻译结果为空\nGoogle 有响应，但脚本没有拿到可用译文。\n请检查响应内容是否为空或被替换。";
+  }
+
+  return TRANSLATE_FAILED_TEXT;
+}
+
 function handleTranslateResponse(method, error, response, data, callback) {
   if (error || !response) {
     addTranslateStat(method, "error");
@@ -1309,7 +1345,7 @@ if (!meta) {
 
       if (translatedCount === 0 && status) {
         if (options.debugTranslateFailure) {
-          markDiagnosticTrack(items, TRANSLATE_FAILED_TEXT);
+          markDiagnosticTrack(items, translateFailureText(status));
           status = status + ";diagnostic=all-cues";
         } else {
           status = status + ";fast-return";
